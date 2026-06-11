@@ -23,6 +23,7 @@ body {
 }
 
 .card {
+  pointer-events: auto;
   margin-top: max(12px, env(safe-area-inset-top));
   background: rgba(255, 255, 255, 0.95);
   border-radius: 14px;
@@ -80,6 +81,33 @@ body {
   font-size: 13px;
   color: #475569;
   min-height: 18px;
+}
+
+.card .actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chip {
+  font-size: 13px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  cursor: pointer;
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.panel .dim {
+  font-size: 20px;
+  color: #94a3b8;
+  font-weight: 600;
 }
 
 /* author display rules (flex etc.) must not defeat the hidden attribute */

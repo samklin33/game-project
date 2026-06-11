@@ -7,18 +7,14 @@ export const HIT_LAYER = "roads-hit";
 export type Tier = "easy" | "medium" | "hard";
 
 export interface RoadProps {
-  name: string;
+  name: string; // full name incl. 段, unique per feature
+  base: string; // parent road (段 stripped)
+  section: string | null;
   tier: Tier;
   length_m: number;
-  sections?: string[];
+  lane?: boolean; // 巷/弄
+  famous?: boolean; // curated famous lane
 }
-
-/** Cumulative class pools per SPEC §1: picking 中等 includes 簡單 roads. */
-export const TIER_POOLS: Record<Tier, Tier[]> = {
-  easy: ["easy"],
-  medium: ["easy", "medium"],
-  hard: ["easy", "medium", "hard"],
-};
 
 const HIGHLIGHT_STATES = ["correct", "wrong", "reveal"] as const;
 export type HighlightState = (typeof HIGHLIGHT_STATES)[number];
@@ -32,7 +28,7 @@ function anyState(): unknown[] {
 }
 
 export function addRoadLayers(map: MlMap, data: GeoJSON.FeatureCollection): void {
-  // promoteId lets feature-state key on the (unique, post-merge) road name.
+  // promoteId lets feature-state key on the (unique) full road name.
   map.addSource(SOURCE_ID, { type: "geojson", data, promoteId: "name" });
 
   map.addLayer({
@@ -67,13 +63,6 @@ export function addRoadLayers(map: MlMap, data: GeoJSON.FeatureCollection): void
   });
 }
 
-/** Show only roads belonging to the chosen difficulty pool. */
-export function setTierFilter(map: MlMap, tier: Tier): void {
-  const filter = ["in", ["get", "tier"], ["literal", TIER_POOLS[tier]]] as never;
-  map.setFilter(VISIBLE_LAYER, filter);
-  map.setFilter(HIT_LAYER, filter);
-}
-
 /** Resolve a tap to road names; tolerant 8px-bbox retry per SPEC §4. */
 export function roadsAtPoint(map: MlMap, point: { x: number; y: number }): string[] {
   let feats = map.queryRenderedFeatures([point.x, point.y] as PointLike, {
@@ -103,4 +92,49 @@ export function clearRoadState(map: MlMap, name: string): void {
 
 export function clearAllRoadStates(map: MlMap): void {
   map.removeFeatureState({ source: SOURCE_ID });
+}
+
+type LngLat = { lng: number; lat: number };
+
+/** Approx. metres from a point to the nearest vertex of the features. */
+export function distanceToFeaturesM(
+  features: GeoJSON.Feature[],
+  p: LngLat,
+): number {
+  const cosLat = Math.cos((p.lat * Math.PI) / 180);
+  let best = Infinity;
+  for (const f of features) {
+    if (f.geometry.type !== "MultiLineString") continue;
+    for (const line of f.geometry.coordinates) {
+      for (const [lng, lat] of line) {
+        const dx = (lng - p.lng) * cosLat;
+        const dy = lat - p.lat;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < best) best = d2;
+      }
+    }
+  }
+  return Math.sqrt(best) * 111320;
+}
+
+/** Bounding box of the features, for fly-to-answer reveals. */
+export function featuresBounds(
+  features: GeoJSON.Feature[],
+): [[number, number], [number, number]] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const f of features) {
+    if (f.geometry.type !== "MultiLineString") continue;
+    for (const line of f.geometry.coordinates) {
+      for (const [x, y] of line) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return [
+    [minX, minY],
+    [maxX, maxY],
+  ];
 }
