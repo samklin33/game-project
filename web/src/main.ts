@@ -33,7 +33,11 @@ export function createMap(container: string | HTMLElement): maplibregl.Map {
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
         },
       },
-      layers: [{ id: "basemap", type: "raster", source: "basemap" }],
+      layers: [
+        // Positron-toned backdrop so missing/loading tiles aren't a void
+        { id: "bg", type: "background", paint: { "background-color": "#f7f7f5" } },
+        { id: "basemap", type: "raster", source: "basemap" },
+      ],
     },
     bounds: TAIPEI_BOUNDS,
     maxBounds: [
@@ -128,6 +132,8 @@ const map = createMap("map");
 // Rotation only disorients on a memorization game — lock to north-up.
 map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
+// e2e handle
+(window as unknown as { __map: maplibregl.Map }).__map = map;
 map.on("load", async () => {
   const data = await loadRoads();
   addRoadLayers(map, data);
