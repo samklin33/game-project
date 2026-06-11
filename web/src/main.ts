@@ -9,6 +9,7 @@ import {
   featuresBounds,
   roadsAtPoint,
   setRoadState,
+  setVisibilityFilter,
   type RoadProps,
 } from "./hittest";
 import { buildPools, Session, type Difficulty, type TapOutcome } from "./game";
@@ -68,6 +69,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   let session: Session | null = null;
   let difficulty: Difficulty = "easy";
   let locked = false;
+  const easyBases = pools.easy.map((p) => p.label);
 
   const targetFeatures = (p: { targets: string[] }) =>
     p.targets.map((n) => featuresByName.get(n)).filter((f): f is GeoJSON.Feature => !!f);
@@ -76,11 +78,13 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
     session = null;
     ui.hidePrompt();
     clearAllRoadStates(map);
+    setVisibilityFilter(map, "all", easyBases);
     ui.showStart({ counts, onPick: begin });
   };
 
   const begin = (d: Difficulty) => {
     difficulty = d;
+    setVisibilityFilter(map, d, easyBases);
     session = new Session(pools[d]);
     next();
   };
