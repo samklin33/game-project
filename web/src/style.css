@@ -17,4 +17,178 @@ body {
   right: 0;
   pointer-events: none;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.card {
+  margin-top: max(12px, env(safe-area-inset-top));
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  padding: 10px 22px 14px;
+  text-align: center;
+  min-width: 220px;
+}
+
+.card .round {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.card .ask {
+  font-size: 13px;
+  color: #334155;
+  margin-top: 2px;
+}
+
+.card .prompt {
+  font-size: 26px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 2px;
+}
+
+.toast {
+  margin-top: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.toast.wrong {
+  background: #d93025;
+}
+
+.toast.ok {
+  background: #1e8e3e;
+}
+
+.toast.info {
+  background: #f9ab00;
+  color: #1f2937;
+}
+
+.card .stats {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  font-size: 13px;
+  color: #475569;
+  min-height: 18px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 18px;
+  padding: 28px 36px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  max-width: 86vw;
+}
+
+.panel h2 {
+  margin: 0 0 6px;
+  color: #0f172a;
+}
+
+.panel .big {
+  font-size: 44px;
+  font-weight: 800;
+  color: #1e8e3e;
+}
+
+.panel .sub {
+  color: #475569;
+  margin-top: 4px;
+}
+
+.panel .grade {
+  font-weight: 600;
+}
+
+.panel button {
+  margin-top: 18px;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #fff;
+  cursor: pointer;
+}
+
+.panel button:active {
+  transform: scale(0.97);
+}
+
+.panel button.secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+  margin-left: 10px;
+}
+
+.panel .logo {
+  font-size: 40px;
+  margin: 0;
+  letter-spacing: 8px;
+  color: #0f172a;
+}
+
+.panel .tagline {
+  color: #475569;
+  margin: 4px 0 18px;
+}
+
+.panel button.tier {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 14px;
+  background: #0f766e;
+}
+
+.panel button.tier:nth-of-type(2) {
+  background: #b45309;
+}
+
+.panel button.tier:nth-of-type(3) {
+  background: #b91c1c;
+}
+
+.tier-name {
+  font-size: 19px;
+}
+
+.tier-hint {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+@media (max-width: 480px) {
+  .card .prompt {
+    font-size: 22px;
+  }
+
+  .panel {
+    padding: 22px 24px;
+  }
 }
