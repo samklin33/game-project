@@ -72,3 +72,67 @@ body {
   background: #f9ab00;
   color: #1f2937;
 }
+
+.card .stats {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  font-size: 13px;
+  color: #475569;
+  min-height: 18px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 18px;
+  padding: 28px 36px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  max-width: 86vw;
+}
+
+.panel h2 {
+  margin: 0 0 6px;
+  color: #0f172a;
+}
+
+.panel .big {
+  font-size: 44px;
+  font-weight: 800;
+  color: #1e8e3e;
+}
+
+.panel .sub {
+  color: #475569;
+  margin-top: 4px;
+}
+
+.panel .grade {
+  font-weight: 600;
+}
+
+.panel button {
+  margin-top: 18px;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #fff;
+  cursor: pointer;
+}
+
+.panel button:active {
+  transform: scale(0.97);
+}

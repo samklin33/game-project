@@ -3,13 +3,20 @@ import { TIER_POOLS } from "./hittest";
 
 export type TapOutcome =
   | { kind: "correct"; name: string }
-  | { kind: "wrong"; name: string }
+  | { kind: "wrong"; name: string; missesLeft: number }
+  | { kind: "reveal"; answer: string; wrongName: string }
   | { kind: "ignored" };
+
+export const MAX_MISSES = 3;
 
 export class Session {
   readonly pool: RoadProps[];
   readonly totalRounds: number;
   round = 0;
+  score = 0;
+  streak = 0;
+  bestStreak = 0;
+  misses = 0;
   target: RoadProps | null = null;
   private remaining: RoadProps[];
 
@@ -27,6 +34,7 @@ export class Session {
       return null;
     }
     this.round += 1;
+    this.misses = 0;
     const i = Math.floor(Math.random() * this.remaining.length);
     this.target = this.remaining.splice(i, 1)[0];
     return this.target;
@@ -40,9 +48,17 @@ export class Session {
   handleTap(names: string[]): TapOutcome {
     if (!this.target || names.length === 0) return { kind: "ignored" };
     if (names.includes(this.target.name)) {
+      this.score += 1;
+      this.streak += 1;
+      this.bestStreak = Math.max(this.bestStreak, this.streak);
       return { kind: "correct", name: this.target.name };
     }
-    return { kind: "wrong", name: names[0] };
+    this.misses += 1;
+    if (this.misses >= MAX_MISSES) {
+      this.streak = 0;
+      return { kind: "reveal", answer: this.target.name, wrongName: names[0] };
+    }
+    return { kind: "wrong", name: names[0], missesLeft: MAX_MISSES - this.misses };
   }
 
   get done(): boolean {

@@ -51,7 +51,7 @@ export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollect
 function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
   setTierFilter(map, tier);
   const ui = new GameUI(document.getElementById("ui")!);
-  const session = new Session(roads, tier);
+  let session = new Session(roads, tier);
   let locked = false;
 
   const next = () => {
@@ -59,23 +59,45 @@ function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
     const target = session.nextRound();
     if (!target) {
       ui.hidePrompt();
+      ui.showSummary({
+        score: session.score,
+        total: session.totalRounds,
+        bestStreak: session.bestStreak,
+        onReplay: () => {
+          session = new Session(roads, tier);
+          next();
+        },
+      });
       return;
     }
     ui.showPrompt(target.name, session.round, session.totalRounds);
+    ui.setScore(session.score, session.streak);
     locked = false;
   };
 
   map.on("click", (e) => {
     if (locked || !session.target) return;
     const outcome = session.handleTap(roadsAtPoint(map, e.point));
-    if (outcome.kind === "correct") {
-      locked = true;
-      setRoadState(map, outcome.name, "correct");
-      window.setTimeout(next, 1200);
-    } else if (outcome.kind === "wrong") {
-      setRoadState(map, outcome.name, "wrong");
-      ui.flashWrong(outcome.name);
-      window.setTimeout(() => clearRoadState(map, outcome.name), 1500);
+    switch (outcome.kind) {
+      case "correct":
+        locked = true;
+        setRoadState(map, outcome.name, "correct");
+        ui.setScore(session.score, session.streak);
+        window.setTimeout(next, 1200);
+        break;
+      case "wrong":
+        setRoadState(map, outcome.name, "wrong");
+        ui.flashWrong(outcome.name, outcome.missesLeft);
+        window.setTimeout(() => clearRoadState(map, outcome.name), 1500);
+        break;
+      case "reveal":
+        locked = true;
+        setRoadState(map, outcome.wrongName, "wrong");
+        setRoadState(map, outcome.answer, "reveal");
+        ui.flashReveal(outcome.answer);
+        ui.setScore(session.score, session.streak);
+        window.setTimeout(next, 2500);
+        break;
     }
   });
 
