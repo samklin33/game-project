@@ -80,8 +80,14 @@ export type TapOutcome =
   | { kind: "reveal"; label: string; targets: string[] }
   | { kind: "ignored" };
 
+export interface SessionOptions {
+  rounds: number;
+  maxAttempts: number; // Infinity = only 看答案 ends a round
+}
+
 export class Session {
   readonly totalRounds: number;
+  readonly maxAttempts: number;
   round = 0;
   points = 0;
   correctCount = 0;
@@ -91,9 +97,10 @@ export class Session {
   target: Prompt | null = null;
   private remaining: Prompt[];
 
-  constructor(pool: Prompt[], totalRounds = 10) {
+  constructor(pool: Prompt[], opts: SessionOptions = { rounds: 10, maxAttempts: MAX_ATTEMPTS }) {
     this.remaining = [...pool];
-    this.totalRounds = Math.min(totalRounds, pool.length);
+    this.totalRounds = Math.min(opts.rounds, pool.length);
+    this.maxAttempts = opts.maxAttempts;
   }
 
   get maxPoints(): number {
@@ -115,12 +122,12 @@ export class Session {
   /**
    * Intersections yield several names — if any matches the prompt it
    * counts (the overlap isn't the player's fault). First hit = 3 pts,
-   * second = 2, third = 1; three misses reveals the answer for 0.
+   * second = 2, any later = 1; running out of attempts reveals for 0.
    */
   handleTap(names: string[]): TapOutcome {
     if (!this.target || names.length === 0) return { kind: "ignored" };
     if (names.some((n) => this.target!.targets.includes(n))) {
-      const earned = MAX_ATTEMPTS - this.attempts;
+      const earned = Math.max(MAX_ATTEMPTS - this.attempts, 1);
       this.points += earned;
       this.correctCount += 1;
       this.streak += 1;
@@ -128,8 +135,8 @@ export class Session {
       return { kind: "correct", targets: this.target.targets, points: earned };
     }
     this.attempts += 1;
-    if (this.attempts >= MAX_ATTEMPTS) return this.reveal();
-    return { kind: "wrong", name: names[0], attemptsLeft: MAX_ATTEMPTS - this.attempts };
+    if (this.attempts >= this.maxAttempts) return this.reveal();
+    return { kind: "wrong", name: names[0], attemptsLeft: this.maxAttempts - this.attempts };
   }
 
   /** Player gives up (看答案) or runs out of attempts. */
