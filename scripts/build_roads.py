@@ -54,8 +54,15 @@ EASY_MIN_M = 1500  # 簡單 = arterial/secondary AND at least this long
 SECTION_RE = re.compile(r"^(.+?)([一二三四五六七八九十]+|[0-9]+)段$")
 
 # Not real "find this road" material: bus-only lanes, ramps, frontage
-# roads. They also pollute hit-testing by shadowing the road they ride on.
-EXCLUDE_RE = re.compile(r"(專用道|匝道|引道|連絡道|聯絡道|側車道|便道|地下車道)")
+# roads, elevated/underpass doubles of surface roads. They also pollute
+# hit-testing by shadowing the road they ride on.
+EXCLUDE_RE = re.compile(
+    r"(專用道|匝道|引道|連絡道|聯絡道|側車道|便道|地下車道|車行地下道|高架道路|高架橋|戰備)"
+)
+
+# Long but obscure — kept in the data (they're real roads) but barred
+# from the 簡單 prompt pool. Mirrored in web/src/game.ts.
+EASY_EXCLUDE_RE = re.compile(r"(公路|隧道|地下道|高架|戰備|產業道路)")
 
 # 巷/弄 famous enough to be fair game in 困難. Curated; extend freely —
 # the build prints which entries matched the OSM data.
@@ -199,11 +206,15 @@ def print_stats(features: list[dict]) -> None:
         b["tier_len"][p["tier"]] = b["tier_len"].get(p["tier"], 0) + p["length_m"]
 
     easy = medium = hard = extreme = 0
-    for b in bases.values():
+    for name, b in bases.items():
         if b["lane"] or b["len"] < MIN_LENGTH_M:
             continue
         medium += 1
-        if max(b["tier_len"], key=b["tier_len"].get) != "hard" and b["len"] >= EASY_MIN_M:
+        if (
+            max(b["tier_len"], key=b["tier_len"].get) != "hard"
+            and b["len"] >= EASY_MIN_M
+            and not EASY_EXCLUDE_RE.search(name)
+        ):
             easy += 1
     for f in features:
         p = f["properties"]
