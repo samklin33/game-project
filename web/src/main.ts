@@ -5,14 +5,13 @@ import {
   addRoadLayers,
   clearAllRoadStates,
   clearRoadState,
+  distanceToFeaturesM,
+  featuresBounds,
   roadsAtPoint,
   setRoadState,
-  setTierFilter,
-  TIER_POOLS,
   type RoadProps,
-  type Tier,
 } from "./hittest";
-import { Session } from "./game";
+import { buildPools, Session, type Difficulty, type TapOutcome } from "./game";
 import { GameUI } from "./ui";
 
 // Taipei bounds per SPEC §5, with margin for maxBounds.
@@ -53,29 +52,34 @@ export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollect
   return res.json();
 }
 
-function setupGame(map: maplibregl.Map, roads: RoadProps[]): void {
+function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   const ui = new GameUI(document.getElementById("ui")!);
+  const featuresByName = new Map<string, GeoJSON.Feature>();
+  for (const f of data.features) {
+    featuresByName.set((f.properties as RoadProps).name, f);
+  }
+  const pools = buildPools(data.features.map((f) => f.properties as RoadProps));
+  const counts = Object.fromEntries(
+    Object.entries(pools).map(([d, pool]) => [d, pool.length]),
+  ) as Record<Difficulty, number>;
+
   let session: Session | null = null;
-  let tier: Tier = "easy";
+  let difficulty: Difficulty = "easy";
   let locked = false;
 
-  const counts = Object.fromEntries(
-    (Object.keys(TIER_POOLS) as Tier[]).map((t) => {
-      const classes = new Set<Tier>(TIER_POOLS[t]);
-      return [t, roads.filter((r) => classes.has(r.tier)).length];
-    }),
-  ) as Record<Tier, number>;
+  const targetFeatures = (p: { targets: string[] }) =>
+    p.targets.map((n) => featuresByName.get(n)).filter((f): f is GeoJSON.Feature => !!f);
 
   const showStart = () => {
+    session = null;
     ui.hidePrompt();
     clearAllRoadStates(map);
     ui.showStart({ counts, onPick: begin });
   };
 
-  const begin = (t: Tier) => {
-    tier = t;
-    setTierFilter(map, t);
-    session = new Session(roads, t);
+  const begin = (d: Difficulty) => {
+    difficulty = d;
+    session = new Session(pools[d]);
     next();
   };
 
@@ -86,44 +90,65 @@ function setupGame(map: maplibregl.Map, roads: RoadProps[]): void {
     if (!target) {
       ui.hidePrompt();
       ui.showSummary({
-        score: session.score,
+        points: session.points,
+        maxPoints: session.maxPoints,
+        correct: session.correctCount,
         total: session.totalRounds,
         bestStreak: session.bestStreak,
-        onReplay: () => begin(tier),
+        onReplay: () => begin(difficulty),
         onChangeTier: showStart,
       });
       return;
     }
-    ui.showPrompt(target.name, session.round, session.totalRounds);
-    ui.setScore(session.score, session.streak);
+    ui.showPrompt(target.label, session.round, session.totalRounds);
+    ui.setScore(session.points, session.streak);
     locked = false;
+  };
+
+  const handleReveal = (outcome: Extract<TapOutcome, { kind: "reveal" }>) => {
+    locked = true;
+    for (const name of outcome.targets) setRoadState(map, name, "reveal");
+    map.fitBounds(featuresBounds(targetFeatures(outcome)), {
+      padding: 80,
+      maxZoom: 15,
+      duration: 900,
+    });
+    ui.flashReveal(outcome.label);
+    ui.setScore(session!.points, session!.streak);
+    window.setTimeout(next, 3000);
   };
 
   map.on("click", (e) => {
     if (locked || !session || !session.target) return;
+    const target = session.target;
     const outcome = session.handleTap(roadsAtPoint(map, e.point));
     switch (outcome.kind) {
       case "correct":
         locked = true;
-        setRoadState(map, outcome.name, "correct");
-        ui.setScore(session.score, session.streak);
+        for (const name of outcome.targets) setRoadState(map, name, "correct");
+        ui.setScore(session.points, session.streak);
         window.setTimeout(next, 1200);
         break;
-      case "wrong":
+      case "wrong": {
         setRoadState(map, outcome.name, "wrong");
-        ui.flashWrong(outcome.name, outcome.missesLeft);
-        window.setTimeout(() => clearRoadState(map, outcome.name), 1500);
+        const dist = distanceToFeaturesM(targetFeatures(target), e.lngLat);
+        ui.flashWrong(outcome.name, outcome.attemptsLeft, dist);
+        const wrongName = outcome.name;
+        window.setTimeout(() => clearRoadState(map, wrongName), 1800);
         break;
+      }
       case "reveal":
-        locked = true;
-        setRoadState(map, outcome.wrongName, "wrong");
-        setRoadState(map, outcome.answer, "reveal");
-        ui.flashReveal(outcome.answer);
-        ui.setScore(session.score, session.streak);
-        window.setTimeout(next, 2500);
+        handleReveal(outcome);
         break;
     }
   });
+
+  ui.onGiveUp = () => {
+    if (locked || !session || !session.target) return;
+    const outcome = session.reveal();
+    if (outcome.kind === "reveal") handleReveal(outcome);
+  };
+  ui.onQuit = showStart;
 
   showStart();
 }
@@ -137,6 +162,5 @@ map.touchZoomRotate.disableRotation();
 map.on("load", async () => {
   const data = await loadRoads();
   addRoadLayers(map, data);
-  const roads = data.features.map((f) => f.properties as RoadProps);
-  setupGame(map, roads);
+  setupGame(map, data);
 });

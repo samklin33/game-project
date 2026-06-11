@@ -60,13 +60,13 @@ EXCLUDE_RE = re.compile(r"(專用道|匝道|引道|連絡道|聯絡道|側車道
 # the build prints which entries matched the OSM data.
 FAMOUS_LANES = [
     "永吉路30巷",          # 五分埔商圈
-    "和平東路118巷",
+    "和平東路二段118巷",
     "忠孝東路四段216巷",   # 東區美食巷
     "忠孝東路四段553巷",
-    "中華路二段315巷",     # 南機場夜市
-    "雙城街18巷",          # 晴光商圈
-    "師大路39巷",          # 師大夜市
     "延吉街131巷",
+    "永康街6巷",           # 永康商圈
+    # wanted but tagged pedestrian in OSM (not fetched): 中華路二段315巷
+    # (南機場), 雙城街18巷 (晴光), 師大路39巷 (師大夜市)
 ]
 
 
