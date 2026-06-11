@@ -47,7 +47,9 @@ export function createMap(container: string | HTMLElement): maplibregl.Map {
 }
 
 export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollection> {
-  const res = await fetch(`${import.meta.env.BASE_URL}${city}.geojson`);
+  const res = await fetch(
+    `${import.meta.env.BASE_URL}${city}.geojson?v=${__DATA_VERSION__}`,
+  );
   if (!res.ok) throw new Error(`failed to load road data: ${res.status}`);
   return res.json();
 }
