@@ -58,8 +58,13 @@ export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollect
 function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   const ui = new GameUI(document.getElementById("ui")!);
   const featuresByName = new Map<string, GeoJSON.Feature>();
+  const baseToNames = new Map<string, string[]>();
   for (const f of data.features) {
-    featuresByName.set((f.properties as RoadProps).name, f);
+    const p = f.properties as RoadProps;
+    featuresByName.set(p.name, f);
+    const siblings = baseToNames.get(p.base);
+    if (siblings) siblings.push(p.name);
+    else baseToNames.set(p.base, [p.name]);
   }
   const pools = buildPools(data.features.map((f) => f.properties as RoadProps));
   const counts = Object.fromEntries(
@@ -136,11 +141,19 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
         window.setTimeout(next, 1200);
         break;
       case "wrong": {
-        setRoadState(map, outcome.name, "wrong");
+        // 簡單/中等 quiz whole roads, so name and flash the whole road —
+        // being told 「這是忠孝東路四段」 when sections aren't in play
+        // is confusing.
+        const grouped = difficulty === "easy" || difficulty === "medium";
+        const base = (featuresByName.get(outcome.name)?.properties as RoadProps | undefined)?.base;
+        const label = grouped && base ? base : outcome.name;
+        const flash = grouped && base ? (baseToNames.get(base) ?? [outcome.name]) : [outcome.name];
+        for (const n of flash) setRoadState(map, n, "wrong");
         const dist = distanceToFeaturesM(targetFeatures(target), e.lngLat);
-        ui.flashWrong(outcome.name, outcome.attemptsLeft, dist);
-        const wrongName = outcome.name;
-        window.setTimeout(() => clearRoadState(map, wrongName), 1800);
+        ui.flashWrong(label, outcome.attemptsLeft, dist);
+        window.setTimeout(() => {
+          for (const n of flash) clearRoadState(map, n);
+        }, 1800);
         break;
       }
       case "reveal":

@@ -15,6 +15,10 @@ const MIN_LANE_M = 100;
 // Pure trunk/primary is only ~40 roads in Taipei because OSM tags famous
 // streets like 信義路/南京東路 as secondary — too thin a pool on its own.
 const EASY_MIN_M = 1500;
+// Long ≠ famous: hill highways, tunnels, service roads are barred from
+// 簡單 even when they pass the length bar (中湖戰備道路, 陽金公路…).
+// Mirrored in scripts/build_roads.py stats.
+const EASY_EXCLUDE = /(公路|隧道|地下道|高架|戰備|產業道路)/;
 
 /**
  * 簡單: long arterial/secondary roads, whole road (all sections light up).
@@ -48,7 +52,9 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
-    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
+    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M && !EASY_EXCLUDE.test(base)) {
+      pools.easy.push(prompt);
+    }
     pools.medium.push(prompt);
   }
   for (const r of roads) {
