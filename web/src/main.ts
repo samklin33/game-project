@@ -12,7 +12,13 @@ import {
   setVisibilityFilter,
   type RoadProps,
 } from "./hittest";
-import { buildPools, Session, type Difficulty, type TapOutcome } from "./game";
+import {
+  buildPools,
+  Session,
+  type Difficulty,
+  type SessionOptions,
+  type TapOutcome,
+} from "./game";
 import { GameUI } from "./ui";
 
 // Taipei bounds per SPEC §5, with margin for maxBounds.
@@ -76,6 +82,25 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   let locked = false;
   const easyBases = pools.easy.map((p) => p.label);
 
+  const OPTS_KEY = "zhaolu-session-opts";
+  let sessionOpts: SessionOptions = { rounds: 10, maxAttempts: 3 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTS_KEY) ?? "");
+    if (typeof saved.rounds === "number") sessionOpts.rounds = saved.rounds;
+    // Infinity doesn't survive JSON — null means unlimited
+    sessionOpts.maxAttempts = saved.maxAttempts === null ? Infinity : saved.maxAttempts;
+  } catch {
+    /* first visit */
+  }
+  const saveOpts = () =>
+    localStorage.setItem(
+      OPTS_KEY,
+      JSON.stringify({
+        rounds: sessionOpts.rounds,
+        maxAttempts: Number.isFinite(sessionOpts.maxAttempts) ? sessionOpts.maxAttempts : null,
+      }),
+    );
+
   const targetFeatures = (p: { targets: string[] }) =>
     p.targets.map((n) => featuresByName.get(n)).filter((f): f is GeoJSON.Feature => !!f);
 
@@ -84,13 +109,21 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
     ui.hidePrompt();
     clearAllRoadStates(map);
     setVisibilityFilter(map, "all", easyBases);
-    ui.showStart({ counts, onPick: begin });
+    ui.showStart({
+      counts,
+      defaults: sessionOpts,
+      onPick: (d, chosen) => {
+        sessionOpts = chosen;
+        saveOpts();
+        begin(d);
+      },
+    });
   };
 
   const begin = (d: Difficulty) => {
     difficulty = d;
     setVisibilityFilter(map, d, easyBases);
-    session = new Session(pools[d]);
+    session = new Session(pools[d], sessionOpts);
     next();
   };
 

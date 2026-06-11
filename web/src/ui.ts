@@ -1,4 +1,11 @@
-import type { Difficulty } from "./game";
+import type { Difficulty, SessionOptions } from "./game";
+
+const ROUND_CHOICES = [10, 20, 50];
+const ATTEMPT_CHOICES: { label: string; value: number }[] = [
+  { label: "3", value: 3 },
+  { label: "5", value: 5 },
+  { label: "∞", value: Infinity },
+];
 
 export const TIER_LABELS: Record<Difficulty, string> = {
   easy: "簡單",
@@ -81,11 +88,8 @@ export class GameUI {
   flashWrong(actualName: string, attemptsLeft: number, distM: number, ms = 2000): void {
     const dist =
       distM >= 1000 ? `${(distM / 1000).toFixed(1)} km` : `${Math.round(distM)} m`;
-    this.showToast(
-      `❌ 這是「${actualName}」,差了約 ${dist}(剩 ${attemptsLeft} 次)`,
-      "wrong",
-      ms,
-    );
+    const tail = Number.isFinite(attemptsLeft) ? `(剩 ${attemptsLeft} 次)` : "";
+    this.showToast(`❌ 這是「${actualName}」,差了約 ${dist}${tail}`, "wrong", ms);
   }
 
   flashReveal(label: string, ms = 3000): void {
@@ -102,8 +106,10 @@ export class GameUI {
 
   showStart(opts: {
     counts: Record<Difficulty, number>;
-    onPick: (d: Difficulty) => void;
+    defaults: SessionOptions;
+    onPick: (d: Difficulty, session: SessionOptions) => void;
   }): void {
+    const chosen: SessionOptions = { ...opts.defaults };
     const buttons = (Object.keys(TIER_LABELS) as Difficulty[])
       .map(
         (t) => `
@@ -113,18 +119,43 @@ export class GameUI {
           </button>`,
       )
       .join("");
+    const roundChips = ROUND_CHOICES.map(
+      (n) => `<button class="chip opt${n === chosen.rounds ? " sel" : ""}" data-rounds="${n}">${n}</button>`,
+    ).join("");
+    const attemptChips = ATTEMPT_CHOICES.map(
+      (a) =>
+        `<button class="chip opt${a.value === chosen.maxAttempts ? " sel" : ""}" data-attempts="${a.value}">${a.label}</button>`,
+    ).join("");
     this.overlay.innerHTML = `
       <div class="panel">
         <h1 class="logo">找路</h1>
         <p class="tagline">地圖給你路名,你來指出它在哪</p>
+        <div class="opt-row"><span class="opt-label">題數</span>${roundChips}</div>
+        <div class="opt-row"><span class="opt-label">每題機會</span>${attemptChips}</div>
         ${buttons}
       </div>
     `;
     this.overlay.hidden = false;
+    const select = (btn: HTMLButtonElement) => {
+      btn.parentElement!.querySelectorAll(".chip").forEach((c) => c.classList.remove("sel"));
+      btn.classList.add("sel");
+    };
+    this.overlay.querySelectorAll<HTMLButtonElement>("[data-rounds]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        chosen.rounds = Number(btn.dataset.rounds);
+        select(btn);
+      }),
+    );
+    this.overlay.querySelectorAll<HTMLButtonElement>("[data-attempts]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        chosen.maxAttempts = Number(btn.dataset.attempts);
+        select(btn);
+      }),
+    );
     this.overlay.querySelectorAll<HTMLButtonElement>(".tier").forEach((btn) =>
       btn.addEventListener("click", () => {
         this.overlay.hidden = true;
-        opts.onPick(btn.dataset.tier as Difficulty);
+        opts.onPick(btn.dataset.tier as Difficulty, chosen);
       }),
     );
   }

@@ -104,6 +104,29 @@ body {
   transform: scale(0.96);
 }
 
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.opt-label {
+  font-size: 13px;
+  color: #64748b;
+  margin-right: 4px;
+}
+
+.chip.opt {
+  min-width: 40px;
+}
+
+.chip.sel {
+  background: #0f172a;
+  color: #fff;
+}
+
 .panel .dim {
   font-size: 20px;
   color: #94a3b8;
