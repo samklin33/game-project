@@ -63,6 +63,25 @@ export function addRoadLayers(map: MlMap, data: GeoJSON.FeatureCollection): void
   });
 }
 
+/**
+ * Show only what the difficulty quizzes — a newbie picking 簡單 sees a
+ * clean arterial skeleton, not all 4,680 features of 巷弄 spaghetti.
+ */
+export function setVisibilityFilter(
+  map: MlMap,
+  difficulty: "easy" | "medium" | "hard" | "extreme" | "all",
+  easyBases: string[],
+): void {
+  const notLane = ["!", ["to-boolean", ["get", "lane"]]];
+  const filter =
+    difficulty === "easy" ? ["in", ["get", "base"], ["literal", easyBases]] :
+    difficulty === "medium" ? notLane :
+    difficulty === "hard" ? ["any", notLane, ["to-boolean", ["get", "famous"]]] :
+    null;
+  map.setFilter(VISIBLE_LAYER, filter as never);
+  map.setFilter(HIT_LAYER, filter as never);
+}
+
 /** Resolve a tap to road names; tolerant 8px-bbox retry per SPEC §4. */
 export function roadsAtPoint(map: MlMap, point: { x: number; y: number }): string[] {
   let feats = map.queryRenderedFeatures([point.x, point.y] as PointLike, {
