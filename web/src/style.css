@@ -17,4 +17,58 @@ body {
   right: 0;
   pointer-events: none;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.card {
+  margin-top: max(12px, env(safe-area-inset-top));
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  padding: 10px 22px 14px;
+  text-align: center;
+  min-width: 220px;
+}
+
+.card .round {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.card .ask {
+  font-size: 13px;
+  color: #334155;
+  margin-top: 2px;
+}
+
+.card .prompt {
+  font-size: 26px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 2px;
+}
+
+.toast {
+  margin-top: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.toast.wrong {
+  background: #d93025;
+}
+
+.toast.ok {
+  background: #1e8e3e;
+}
+
+.toast.info {
+  background: #f9ab00;
+  color: #1f2937;
 }

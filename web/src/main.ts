@@ -1,7 +1,18 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./style.css";
-import { addRoadLayers } from "./hittest";
+import {
+  addRoadLayers,
+  clearAllRoadStates,
+  clearRoadState,
+  roadsAtPoint,
+  setRoadState,
+  setTierFilter,
+  type RoadProps,
+  type Tier,
+} from "./hittest";
+import { Session } from "./game";
+import { GameUI } from "./ui";
 
 // Taipei bounds per SPEC §5, with margin for maxBounds.
 export const TAIPEI_BOUNDS: [number, number, number, number] = [121.45, 24.96, 121.67, 25.21];
@@ -37,8 +48,44 @@ export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollect
   return res.json();
 }
 
+function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
+  setTierFilter(map, tier);
+  const ui = new GameUI(document.getElementById("ui")!);
+  const session = new Session(roads, tier);
+  let locked = false;
+
+  const next = () => {
+    clearAllRoadStates(map);
+    const target = session.nextRound();
+    if (!target) {
+      ui.hidePrompt();
+      return;
+    }
+    ui.showPrompt(target.name, session.round, session.totalRounds);
+    locked = false;
+  };
+
+  map.on("click", (e) => {
+    if (locked || !session.target) return;
+    const outcome = session.handleTap(roadsAtPoint(map, e.point));
+    if (outcome.kind === "correct") {
+      locked = true;
+      setRoadState(map, outcome.name, "correct");
+      window.setTimeout(next, 1200);
+    } else if (outcome.kind === "wrong") {
+      setRoadState(map, outcome.name, "wrong");
+      ui.flashWrong(outcome.name);
+      window.setTimeout(() => clearRoadState(map, outcome.name), 1500);
+    }
+  });
+
+  next();
+}
+
 const map = createMap("map");
 map.on("load", async () => {
   const data = await loadRoads();
   addRoadLayers(map, data);
+  const roads = data.features.map((f) => f.properties as RoadProps);
+  startGame(map, roads, "medium");
 });
