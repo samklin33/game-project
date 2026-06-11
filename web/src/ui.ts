@@ -4,8 +4,18 @@ const ROUND_CHOICES = [10, 20, 50];
 const ATTEMPT_CHOICES: { label: string; value: number }[] = [
   { label: "3", value: 3 },
   { label: "5", value: 5 },
+  { label: "10", value: 10 },
   { label: "∞", value: Infinity },
 ];
+
+// Grade cutoffs (top / great / ok) scale with difficulty — 20/30 in 極難
+// is heroic and deserves better than 「建議先別關導航」.
+const GRADE_CUTS: Record<Difficulty, [number, number, number]> = {
+  easy: [1, 0.7, 0.4],
+  medium: [0.85, 0.55, 0.3],
+  hard: [0.6, 0.4, 0.2],
+  extreme: [0.4, 0.25, 0.1],
+};
 
 export const TIER_LABELS: Record<Difficulty, string> = {
   easy: "簡單",
@@ -166,14 +176,18 @@ export class GameUI {
     correct: number;
     total: number;
     bestStreak: number;
+    difficulty: Difficulty;
     onReplay: () => void;
     onChangeTier: () => void;
   }): void {
     const ratio = opts.points / opts.maxPoints;
+    const [top, great, ok] = GRADE_CUTS[opts.difficulty];
+    const harsh = opts.difficulty === "hard" || opts.difficulty === "extreme";
     const grade =
-      ratio === 1 ? "你就是人肉導航 🧭" :
-      ratio >= 0.7 ? "路感很好!" :
-      ratio >= 0.4 ? "還行,多走幾趟吧" :
+      ratio >= top ? "你就是人肉導航 🧭" :
+      ratio >= great ? "路感很好!" :
+      ratio >= ok ? "還行,多走幾趟吧" :
+      harsh ? "這難度本來就是地獄,正常發揮 🫡" :
       "建議先別關導航 😅";
     this.overlay.innerHTML = `
       <div class="panel">

@@ -139,6 +139,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
         correct: session.correctCount,
         total: session.totalRounds,
         bestStreak: session.bestStreak,
+        difficulty,
         onReplay: () => begin(difficulty),
         onChangeTier: showStart,
       });
