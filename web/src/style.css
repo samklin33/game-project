@@ -136,3 +136,59 @@ body {
 .panel button:active {
   transform: scale(0.97);
 }
+
+.panel button.secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+  margin-left: 10px;
+}
+
+.panel .logo {
+  font-size: 40px;
+  margin: 0;
+  letter-spacing: 8px;
+  color: #0f172a;
+}
+
+.panel .tagline {
+  color: #475569;
+  margin: 4px 0 18px;
+}
+
+.panel button.tier {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 14px;
+  background: #0f766e;
+}
+
+.panel button.tier:nth-of-type(2) {
+  background: #b45309;
+}
+
+.panel button.tier:nth-of-type(3) {
+  background: #b91c1c;
+}
+
+.tier-name {
+  font-size: 19px;
+}
+
+.tier-hint {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+@media (max-width: 480px) {
+  .card .prompt {
+    font-size: 22px;
+  }
+
+  .panel {
+    padding: 22px 24px;
+  }
+}

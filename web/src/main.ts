@@ -8,6 +8,7 @@ import {
   roadsAtPoint,
   setRoadState,
   setTierFilter,
+  TIER_POOLS,
   type RoadProps,
   type Tier,
 } from "./hittest";
@@ -48,13 +49,34 @@ export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollect
   return res.json();
 }
 
-function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
-  setTierFilter(map, tier);
+function setupGame(map: maplibregl.Map, roads: RoadProps[]): void {
   const ui = new GameUI(document.getElementById("ui")!);
-  let session = new Session(roads, tier);
+  let session: Session | null = null;
+  let tier: Tier = "easy";
   let locked = false;
 
+  const counts = Object.fromEntries(
+    (Object.keys(TIER_POOLS) as Tier[]).map((t) => {
+      const classes = new Set<Tier>(TIER_POOLS[t]);
+      return [t, roads.filter((r) => classes.has(r.tier)).length];
+    }),
+  ) as Record<Tier, number>;
+
+  const showStart = () => {
+    ui.hidePrompt();
+    clearAllRoadStates(map);
+    ui.showStart({ counts, onPick: begin });
+  };
+
+  const begin = (t: Tier) => {
+    tier = t;
+    setTierFilter(map, t);
+    session = new Session(roads, t);
+    next();
+  };
+
   const next = () => {
+    if (!session) return;
     clearAllRoadStates(map);
     const target = session.nextRound();
     if (!target) {
@@ -63,10 +85,8 @@ function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
         score: session.score,
         total: session.totalRounds,
         bestStreak: session.bestStreak,
-        onReplay: () => {
-          session = new Session(roads, tier);
-          next();
-        },
+        onReplay: () => begin(tier),
+        onChangeTier: showStart,
       });
       return;
     }
@@ -76,7 +96,7 @@ function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
   };
 
   map.on("click", (e) => {
-    if (locked || !session.target) return;
+    if (locked || !session || !session.target) return;
     const outcome = session.handleTap(roadsAtPoint(map, e.point));
     switch (outcome.kind) {
       case "correct":
@@ -101,13 +121,16 @@ function startGame(map: maplibregl.Map, roads: RoadProps[], tier: Tier): void {
     }
   });
 
-  next();
+  showStart();
 }
 
 const map = createMap("map");
+// Rotation only disorients on a memorization game — lock to north-up.
+map.dragRotate.disable();
+map.touchZoomRotate.disableRotation();
 map.on("load", async () => {
   const data = await loadRoads();
   addRoadLayers(map, data);
   const roads = data.features.map((f) => f.properties as RoadProps);
-  startGame(map, roads, "medium");
+  setupGame(map, roads);
 });
