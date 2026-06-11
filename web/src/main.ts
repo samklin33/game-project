@@ -1,6 +1,7 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./style.css";
+import { addRoadLayers } from "./hittest";
 
 // Taipei bounds per SPEC §5, with margin for maxBounds.
 export const TAIPEI_BOUNDS: [number, number, number, number] = [121.45, 24.96, 121.67, 25.21];
@@ -30,7 +31,14 @@ export function createMap(container: string | HTMLElement): maplibregl.Map {
   });
 }
 
+export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollection> {
+  const res = await fetch(`${import.meta.env.BASE_URL}${city}.geojson`);
+  if (!res.ok) throw new Error(`failed to load road data: ${res.status}`);
+  return res.json();
+}
+
 const map = createMap("map");
-map.on("load", () => {
-  // Road layers + game loop arrive in later milestones.
+map.on("load", async () => {
+  const data = await loadRoads();
+  addRoadLayers(map, data);
 });
