@@ -8,7 +8,7 @@ export const TIER_LABELS: Record<Difficulty, string> = {
 };
 
 const TIER_HINTS: Record<Difficulty, string> = {
-  easy: "主要幹道",
+  easy: "知名大路",
   medium: "所有道路,不含巷弄",
   hard: "分段考驗+知名巷弄",
   extreme: "巷弄地獄,分段考",

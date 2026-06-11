@@ -11,9 +11,13 @@ export interface Prompt {
 export const MAX_ATTEMPTS = 3;
 const MIN_ROAD_M = 150;
 const MIN_LANE_M = 100;
+// 簡單: prominent = arterial-or-secondary class AND at least this long.
+// Pure trunk/primary is only ~40 roads in Taipei because OSM tags famous
+// streets like 信義路/南京東路 as secondary — too thin a pool on its own.
+const EASY_MIN_M = 1500;
 
 /**
- * 簡單: arterial roads, whole road (all sections light up).
+ * 簡單: long arterial/secondary roads, whole road (all sections light up).
  * 中等: every road, whole road — no 巷/弄.
  * 困難: roads quizzed per 段, plus curated famous 巷/弄.
  * 極難: everything, per 段, 巷弄 included.
@@ -44,7 +48,7 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
-    if (dominant === "easy") pools.easy.push(prompt);
+    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
     pools.medium.push(prompt);
   }
   for (const r of roads) {

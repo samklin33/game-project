@@ -47,6 +47,7 @@ TIER_LABELS = {"easy": "簡單", "medium": "中等", "hard": "巷弄"}
 
 MIN_LENGTH_M = 150  # prompt-pool floor for roads (game-side mirror in stats)
 MIN_LANE_LENGTH_M = 100  # prompt-pool floor for 巷弄 in 極難
+EASY_MIN_M = 1500  # 簡單 = arterial/secondary AND at least this long
 
 # 忠孝東路一段 → base 忠孝東路, section 一段. Chinese numerals up to 十九
 # cover every real case; half/full-width digits guard odd tagging.
@@ -202,7 +203,7 @@ def print_stats(features: list[dict]) -> None:
         if b["lane"] or b["len"] < MIN_LENGTH_M:
             continue
         medium += 1
-        if max(b["tier_len"], key=b["tier_len"].get) == "easy":
+        if max(b["tier_len"], key=b["tier_len"].get) != "hard" and b["len"] >= EASY_MIN_M:
             easy += 1
     for f in features:
         p = f["properties"]
