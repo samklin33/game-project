@@ -74,6 +74,13 @@ body {
   color: #1f2937;
 }
 
+.card .hint {
+  font-size: 14px;
+  font-weight: 600;
+  color: #b45309;
+  margin-top: 4px;
+}
+
 .card .stats {
   display: flex;
   justify-content: center;
@@ -81,6 +88,11 @@ body {
   font-size: 13px;
   color: #475569;
   min-height: 18px;
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .card .actions {

@@ -34,6 +34,16 @@ way(area.city)["highway"~"^(trunk|primary|secondary|tertiary|residential|unclass
 out geom;
 """
 
+# District (區) boundaries for the area hint. Taiwan tags 區/鄉/鎮 at
+# admin_level 7. `out geom` returns each relation's member ways with
+# coordinates, which we stitch into rings for point-in-polygon.
+DISTRICT_QUERY_TEMPLATE = """\
+[out:json][timeout:180];
+area["name"="{city}"]["admin_level"="4"]->.city;
+rel(area.city)["admin_level"="7"]["boundary"="administrative"];
+out geom;
+"""
+
 # SPEC §1: 簡單 = arterials, 中等 = district roads, 困難 = 巷弄 hell.
 TIER_BY_CLASS = {
     "trunk": "easy",
@@ -48,6 +58,7 @@ TIER_LABELS = {"easy": "簡單", "medium": "中等", "hard": "巷弄"}
 MIN_LENGTH_M = 150  # prompt-pool floor for roads (game-side mirror in stats)
 MIN_LANE_LENGTH_M = 100  # prompt-pool floor for 巷弄 in 極難
 EASY_MIN_M = 1500  # 簡單 = arterial/secondary AND at least this long
+MEDIUM_MIN_M = 500  # 中等 floor — drop obscure sub-500m stubs (game-side mirror)
 
 # 忠孝東路一段 → base 忠孝東路, section 一段. Chinese numerals up to 十九
 # cover every real case; half/full-width digits guard odd tagging.
@@ -104,8 +115,7 @@ def line_length_m(coords: list[list[float]]) -> float:
     )
 
 
-def fetch_overpass(city: str) -> dict:
-    query = QUERY_TEMPLATE.format(city=city)
+def fetch_overpass(query: str) -> dict:
     data = urllib.parse.urlencode({"data": query}).encode()
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
@@ -134,7 +144,98 @@ def fetch_overpass(city: str) -> dict:
     raise SystemExit(f"All Overpass endpoints failed: {last_err}")
 
 
-def build_features(elements: list[dict]) -> list[dict]:
+def _pt_eq(a: list[float], b: list[float], tol: float = 1e-7) -> bool:
+    return abs(a[0] - b[0]) < tol and abs(a[1] - b[1]) < tol
+
+
+def stitch_rings(segments: list[list[list[float]]]) -> list[list[list[float]]]:
+    """Join boundary ways (shared endpoints) into closed rings."""
+    segs = [list(s) for s in segments if len(s) >= 2]
+    rings: list[list[list[float]]] = []
+    while segs:
+        ring = segs.pop()
+        extended = True
+        while extended and not _pt_eq(ring[0], ring[-1]):
+            extended = False
+            for i, s in enumerate(segs):
+                if _pt_eq(ring[-1], s[0]):
+                    ring.extend(s[1:])
+                elif _pt_eq(ring[-1], s[-1]):
+                    ring.extend(reversed(s[:-1]))
+                elif _pt_eq(ring[0], s[-1]):
+                    ring[0:0] = s[:-1]
+                elif _pt_eq(ring[0], s[0]):
+                    ring[0:0] = list(reversed(s[1:]))
+                else:
+                    continue
+                segs.pop(i)
+                extended = True
+                break
+        rings.append(ring)
+    return rings
+
+
+def point_in_ring(x: float, y: float, ring: list[list[float]]) -> bool:
+    inside = False
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def parse_districts(elements: list[dict]) -> list[tuple[str, list[list[list[float]]]]]:
+    """[(district_name, [ring, ...]), ...] from admin_level=7 relations."""
+    districts = []
+    for el in elements:
+        if el.get("type") != "relation":
+            continue
+        name = el.get("tags", {}).get("name")
+        if not name:
+            continue
+        outers = [
+            [[pt["lon"], pt["lat"]] for pt in m["geometry"]]
+            for m in el.get("members", [])
+            if m.get("type") == "way" and m.get("role") == "outer" and m.get("geometry")
+        ]
+        rings = [r for r in stitch_rings(outers) if len(r) >= 4]
+        if rings:
+            districts.append((name, rings))
+    return districts
+
+
+def assign_district(
+    point: list[float], districts: list[tuple[str, list[list[list[float]]]]]
+) -> str | None:
+    x, y = point
+    for name, rings in districts:
+        if any(point_in_ring(x, y, ring) for ring in rings):
+            return name
+    # Border/precision miss → nearest district by closest ring vertex.
+    best, best_d = None, float("inf")
+    for name, rings in districts:
+        for ring in rings:
+            for vx, vy in ring:
+                d = (vx - x) ** 2 + (vy - y) ** 2
+                if d < best_d:
+                    best_d, best = d, name
+    return best
+
+
+def representative_point(lines: list[list[list[float]]]) -> list[float]:
+    """Midpoint of the longest segment — a stable interior-ish point."""
+    longest = max(lines, key=line_length_m)
+    return longest[len(longest) // 2]
+
+
+def build_features(
+    elements: list[dict],
+    districts: list[tuple[str, list[list[list[float]]]]] | None = None,
+) -> list[dict]:
     # One feature per full road name *including* 段, so the game can quiz
     # sections separately in 困難/極難 and group by `base` in 簡單/中等.
     roads: dict[str, dict] = {}
@@ -176,6 +277,10 @@ def build_features(elements: list[dict]) -> list[dict]:
             props["lane"] = True
         if name in famous:
             props["famous"] = True
+        if districts:
+            district = assign_district(representative_point(road["lines"]), districts)
+            if district:
+                props["district"] = district
         features.append(
             {
                 "type": "Feature",
@@ -207,13 +312,15 @@ def print_stats(features: list[dict]) -> None:
 
     easy = medium = hard = extreme = 0
     for name, b in bases.items():
-        if b["lane"] or b["len"] < MIN_LENGTH_M:
+        if b["lane"]:
             continue
-        medium += 1
+        not_junk = not EASY_EXCLUDE_RE.search(name)
+        if b["len"] >= MEDIUM_MIN_M and not_junk:
+            medium += 1
         if (
             max(b["tier_len"], key=b["tier_len"].get) != "hard"
             and b["len"] >= EASY_MIN_M
-            and not EASY_EXCLUDE_RE.search(name)
+            and not_junk
         ):
             easy += 1
     for f in features:
@@ -228,12 +335,14 @@ def print_stats(features: list[dict]) -> None:
             hard += 1
             extreme += 1
 
+    with_district = sum(1 for f in features if f["properties"].get("district"))
     print("\nPrompt pool per difficulty:")
     print(f"  簡單 (easy):    {easy:5d} 幹道")
-    print(f"  中等 (medium):  {medium:5d} 道路(不含巷弄)")
+    print(f"  中等 (medium):  {medium:5d} 道路(≥500m,不含巷弄/雜路)")
     print(f"  困難 (hard):    {hard:5d} 分段道路+知名巷弄")
     print(f"  極難 (extreme): {extreme:5d} 全部(含巷弄)")
     print(f"  Total features: {len(features)} ({len(bases)} base roads)")
+    print(f"  District hint coverage: {with_district}/{len(features)}")
 
 
 def main() -> None:
@@ -242,9 +351,21 @@ def main() -> None:
     ap.add_argument("--out", default="data/taipei.geojson", help="output GeoJSON path")
     args = ap.parse_args()
 
-    raw = fetch_overpass(args.city)
+    raw = fetch_overpass(QUERY_TEMPLATE.format(city=args.city))
     print(f"Overpass returned {len(raw.get('elements', []))} ways", file=sys.stderr)
-    features = build_features(raw.get("elements", []))
+
+    districts: list[tuple[str, list[list[list[float]]]]] = []
+    try:
+        draw = fetch_overpass(DISTRICT_QUERY_TEMPLATE.format(city=args.city))
+        districts = parse_districts(draw.get("elements", []))
+        print(
+            f"Parsed {len(districts)} districts: {[d[0] for d in districts]}",
+            file=sys.stderr,
+        )
+    except SystemExit as e:
+        print(f"District fetch failed, continuing without hints: {e}", file=sys.stderr)
+
+    features = build_features(raw.get("elements", []), districts)
 
     geojson = {"type": "FeatureCollection", "features": features}
     with open(args.out, "w", encoding="utf-8") as f:

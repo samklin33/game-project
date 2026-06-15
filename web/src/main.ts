@@ -145,7 +145,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
       });
       return;
     }
-    ui.showPrompt(target.label, session.round, session.totalRounds);
+    ui.showPrompt(target.label, session.round, session.totalRounds, !!target.hint);
     ui.setScore(session.points, session.streak);
     locked = false;
   };
@@ -200,6 +200,11 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
     if (locked || !session || !session.target) return;
     const outcome = session.reveal();
     if (outcome.kind === "reveal") handleReveal(outcome);
+  };
+  ui.onHint = () => {
+    if (locked || !session || !session.target) return;
+    const hint = session.useHint();
+    if (hint) ui.showHint(hint);
   };
   ui.onQuit = showStart;
 
