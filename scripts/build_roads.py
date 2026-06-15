@@ -315,13 +315,13 @@ def print_stats(features: list[dict]) -> None:
         if b["lane"]:
             continue
         not_junk = not EASY_EXCLUDE_RE.search(name)
+        # 中等/簡單 exclude residential/unclassified (困難 material): mountain
+        # tracks and remote bridges leak in if we gate on length alone.
+        if max(b["tier_len"], key=b["tier_len"].get) == "hard":
+            continue
         if b["len"] >= MEDIUM_MIN_M and not_junk:
             medium += 1
-        if (
-            max(b["tier_len"], key=b["tier_len"].get) != "hard"
-            and b["len"] >= EASY_MIN_M
-            and not_junk
-        ):
+        if b["len"] >= EASY_MIN_M and not_junk:
             easy += 1
     for f in features:
         p = f["properties"]
@@ -338,7 +338,7 @@ def print_stats(features: list[dict]) -> None:
     with_district = sum(1 for f in features if f["properties"].get("district"))
     print("\nPrompt pool per difficulty:")
     print(f"  簡單 (easy):    {easy:5d} 幹道")
-    print(f"  中等 (medium):  {medium:5d} 道路(≥500m,不含巷弄/雜路)")
+    print(f"  中等 (medium):  {medium:5d} 區域道路(≥500m,不含巷弄/住宅路/雜路)")
     print(f"  困難 (hard):    {hard:5d} 分段道路+知名巷弄")
     print(f"  極難 (extreme): {extreme:5d} 全部(含巷弄)")
     print(f"  Total features: {len(features)} ({len(bases)} base roads)")
