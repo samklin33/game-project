@@ -13,6 +13,14 @@ export const MAX_ATTEMPTS = 3;
 const MIN_ROAD_M = 150;
 const MIN_LANE_M = 100;
 const MEDIUM_MIN_M = 500; // 中等 floor — drop obscure sub-500m stubs
+
+// Scoring by attempt number (0-indexed): 1st correct tap = 10, then
+// 8/5/3/1, flooring at 1 for any later attempt. A used hint caps the
+// round at HINT_POINTS.
+const ATTEMPT_POINTS = [10, 8, 5, 3, 1];
+const HINT_POINTS = 3;
+const pointsForAttempt = (attempt: number): number =>
+  ATTEMPT_POINTS[Math.min(attempt, ATTEMPT_POINTS.length - 1)];
 // 簡單: prominent = arterial-or-secondary class AND at least this long.
 // Pure trunk/primary is only ~40 roads in Taipei because OSM tags famous
 // streets like 信義路/南京東路 as secondary — too thin a pool on its own.
@@ -69,7 +77,10 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
       c[1] > a[1] ? c : a,
     )[0];
     const notJunk = !EASY_EXCLUDE.test(base);
-    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M && notJunk) pools.easy.push(prompt);
+    // 中等/簡單 are proper district roads (幹道/次要/tertiary). Residential
+    // & unclassified — mountain tracks, remote bridges — belong to 困難.
+    if (dominant === "hard") continue;
+    if (b.totalLen >= EASY_MIN_M && notJunk) pools.easy.push(prompt);
     if (b.totalLen >= MEDIUM_MIN_M && notJunk) pools.medium.push(prompt);
   }
   for (const r of roads) {
@@ -124,7 +135,7 @@ export class Session {
   }
 
   get maxPoints(): number {
-    return this.totalRounds * MAX_ATTEMPTS;
+    return this.totalRounds * ATTEMPT_POINTS[0];
   }
 
   nextRound(): Prompt | null {
@@ -156,7 +167,8 @@ export class Session {
   handleTap(names: string[]): TapOutcome {
     if (!this.target || names.length === 0) return { kind: "ignored" };
     if (names.some((n) => this.target!.targets.includes(n))) {
-      const earned = this.hintUsed ? 1 : Math.max(MAX_ATTEMPTS - this.attempts, 1);
+      const base = pointsForAttempt(this.attempts);
+      const earned = this.hintUsed ? Math.min(base, HINT_POINTS) : base;
       this.points += earned;
       this.correctCount += 1;
       this.streak += 1;
