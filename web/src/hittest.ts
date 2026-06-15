@@ -14,6 +14,7 @@ export interface RoadProps {
   length_m: number;
   lane?: boolean; // 巷/弄
   famous?: boolean; // curated famous lane
+  district?: string; // 區 of this feature's representative point
 }
 
 const HIGHLIGHT_STATES = ["correct", "wrong", "reveal"] as const;

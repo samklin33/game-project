@@ -6,11 +6,13 @@ export type Difficulty = "easy" | "medium" | "hard" | "extreme";
 export interface Prompt {
   label: string;
   targets: string[];
+  hint?: string; // district(s) the road passes through, e.g. 大安、信義區
 }
 
 export const MAX_ATTEMPTS = 3;
 const MIN_ROAD_M = 150;
 const MIN_LANE_M = 100;
+const MEDIUM_MIN_M = 500; // 中等 floor — drop obscure sub-500m stubs
 // 簡單: prominent = arterial-or-secondary class AND at least this long.
 // Pure trunk/primary is only ~40 roads in Taipei because OSM tags famous
 // streets like 信義路/南京東路 as secondary — too thin a pool on its own.
@@ -20,9 +22,20 @@ const EASY_MIN_M = 1500;
 // Mirrored in scripts/build_roads.py stats.
 const EASY_EXCLUDE = /(公路|隧道|地下道|高架|戰備|產業道路)/;
 
+/** "大安、信義、松山區" from ["大安區","信義區","松山區"]; undefined if empty. */
+function formatDistricts(names: string[]): string | undefined {
+  const uniq = [...new Set(names.filter(Boolean))];
+  if (uniq.length === 0) return undefined;
+  const suffix = uniq[0].slice(-1);
+  if (uniq.every((d) => d.endsWith(suffix))) {
+    return uniq.map((d) => d.slice(0, -1)).join("、") + suffix;
+  }
+  return uniq.join("、");
+}
+
 /**
  * 簡單: long arterial/secondary roads, whole road (all sections light up).
- * 中等: every road, whole road — no 巷/弄.
+ * 中等: roads ≥500m, whole road — no 巷/弄, no junk names.
  * 困難: roads quizzed per 段, plus curated famous 巷/弄.
  * 極難: everything, per 段, 巷弄 included.
  */
@@ -30,6 +43,7 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
   interface BaseAgg {
     names: string[];
     lenByTier: Partial<Record<Tier, number>>;
+    distLen: Map<string, number>; // district -> summed length, for the corridor hint
     totalLen: number;
     lane: boolean;
   }
@@ -37,28 +51,33 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
   for (const r of roads) {
     let b = bases.get(r.base);
     if (!b) {
-      b = { names: [], lenByTier: {}, totalLen: 0, lane: !!r.lane };
+      b = { names: [], lenByTier: {}, distLen: new Map(), totalLen: 0, lane: !!r.lane };
       bases.set(r.base, b);
     }
     b.names.push(r.name);
     b.totalLen += r.length_m;
     b.lenByTier[r.tier] = (b.lenByTier[r.tier] ?? 0) + r.length_m;
+    if (r.district) b.distLen.set(r.district, (b.distLen.get(r.district) ?? 0) + r.length_m);
   }
 
   const pools: Record<Difficulty, Prompt[]> = { easy: [], medium: [], hard: [], extreme: [] };
   for (const [base, b] of bases) {
-    if (b.lane || b.totalLen < MIN_ROAD_M) continue;
-    const prompt = { label: base, targets: b.names };
+    if (b.lane) continue;
+    const corridor = [...b.distLen.entries()].sort((a, c) => c[1] - a[1]).map((e) => e[0]);
+    const prompt: Prompt = { label: base, targets: b.names, hint: formatDistricts(corridor) };
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
-    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M && !EASY_EXCLUDE.test(base)) {
-      pools.easy.push(prompt);
-    }
-    pools.medium.push(prompt);
+    const notJunk = !EASY_EXCLUDE.test(base);
+    if (dominant !== "hard" && b.totalLen >= EASY_MIN_M && notJunk) pools.easy.push(prompt);
+    if (b.totalLen >= MEDIUM_MIN_M && notJunk) pools.medium.push(prompt);
   }
   for (const r of roads) {
-    const single = { label: r.name, targets: [r.name] };
+    const single: Prompt = {
+      label: r.name,
+      targets: [r.name],
+      hint: formatDistricts(r.district ? [r.district] : []),
+    };
     if (r.lane) {
       if (r.famous) {
         pools.hard.push(single);
@@ -94,6 +113,7 @@ export class Session {
   streak = 0;
   bestStreak = 0;
   attempts = 0;
+  hintUsed = false;
   target: Prompt | null = null;
   private remaining: Prompt[];
 
@@ -114,20 +134,29 @@ export class Session {
     }
     this.round += 1;
     this.attempts = 0;
+    this.hintUsed = false;
     const i = Math.floor(Math.random() * this.remaining.length);
     this.target = this.remaining.splice(i, 1)[0];
     return this.target;
   }
 
+  /** Reveal the district hint; caps this round's score at 1. Returns it. */
+  useHint(): string | null {
+    if (!this.target?.hint) return null;
+    this.hintUsed = true;
+    return this.target.hint;
+  }
+
   /**
    * Intersections yield several names — if any matches the prompt it
    * counts (the overlap isn't the player's fault). First hit = 3 pts,
-   * second = 2, any later = 1; running out of attempts reveals for 0.
+   * second = 2, any later = 1; a used hint caps the round at 1; running
+   * out of attempts reveals for 0.
    */
   handleTap(names: string[]): TapOutcome {
     if (!this.target || names.length === 0) return { kind: "ignored" };
     if (names.some((n) => this.target!.targets.includes(n))) {
-      const earned = Math.max(MAX_ATTEMPTS - this.attempts, 1);
+      const earned = this.hintUsed ? 1 : Math.max(MAX_ATTEMPTS - this.attempts, 1);
       this.points += earned;
       this.correctCount += 1;
       this.streak += 1;

@@ -41,10 +41,13 @@ export class GameUI {
   private streakEl: HTMLElement;
   private toast: HTMLElement;
   private overlay: HTMLElement;
+  private hintEl: HTMLElement;
+  private hintBtn: HTMLButtonElement;
   private toastTimer: number | undefined;
 
   onGiveUp: () => void = () => {};
   onQuit: () => void = () => {};
+  onHint: () => void = () => {};
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -53,8 +56,10 @@ export class GameUI {
         <div class="round" id="round"></div>
         <div class="ask">找出這條路:</div>
         <div class="prompt" id="prompt"></div>
+        <div class="hint" id="hint" hidden></div>
         <div class="stats"><span id="score"></span><span id="streak"></span></div>
         <div class="actions">
+          <button id="hint-btn" class="chip">提示</button>
           <button id="give-up" class="chip">看答案</button>
           <button id="quit" class="chip">換難度</button>
         </div>
@@ -69,6 +74,9 @@ export class GameUI {
     this.streakEl = this.must("#streak");
     this.toast = this.must("#toast");
     this.overlay = this.must("#overlay");
+    this.hintEl = this.must("#hint");
+    this.hintBtn = this.must("#hint-btn") as HTMLButtonElement;
+    this.hintBtn.addEventListener("click", () => this.onHint());
     this.must("#give-up").addEventListener("click", () => this.onGiveUp());
     this.must("#quit").addEventListener("click", () => this.onQuit());
   }
@@ -79,10 +87,23 @@ export class GameUI {
     return el;
   }
 
-  showPrompt(label: string, round: number, total: number): void {
+  showPrompt(label: string, round: number, total: number, hintAvailable: boolean): void {
     this.card.hidden = false;
     this.promptEl.textContent = label;
     this.roundEl.textContent = `第 ${round} / ${total} 題`;
+    this.hintEl.hidden = true;
+    this.hintEl.textContent = "";
+    this.hintBtn.hidden = !hintAvailable;
+    this.hintBtn.disabled = false;
+    this.hintBtn.textContent = "提示";
+  }
+
+  /** Show the district hint inline; it stays for the rest of the round. */
+  showHint(text: string): void {
+    this.hintEl.textContent = `📍 經過 ${text}`;
+    this.hintEl.hidden = false;
+    this.hintBtn.disabled = true;
+    this.hintBtn.textContent = "已用提示 (−分)";
   }
 
   hidePrompt(): void {
