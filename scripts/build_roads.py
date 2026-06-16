@@ -29,7 +29,7 @@ OVERPASS_ENDPOINTS = [
 ]
 
 QUERY_TEMPLATE = """\
-[out:json][timeout:180];
+[out:json][timeout:600];
 area["name"="{city}"]["admin_level"="4"]->.city;
 way(area.city)["highway"~"^(trunk|primary|secondary|tertiary|residential|unclassified)$"]["name"];
 out geom;
@@ -39,7 +39,7 @@ out geom;
 # admin_level 7. `out geom` returns each relation's member ways with
 # coordinates, which we stitch into rings for point-in-polygon.
 DISTRICT_QUERY_TEMPLATE = """\
-[out:json][timeout:180];
+[out:json][timeout:600];
 area["name"="{city}"]["admin_level"="4"]->.city;
 rel(area.city)["admin_level"="7"]["boundary"="administrative"];
 out geom;
@@ -164,7 +164,7 @@ def fetch_overpass(query: str) -> dict:
                         "Accept-Encoding": "gzip",
                     },
                 )
-                with urllib.request.urlopen(req, timeout=300) as resp:
+                with urllib.request.urlopen(req, timeout=600) as resp:
                     body = resp.read()
                     if resp.headers.get("Content-Encoding") == "gzip":
                         body = gzip.GzipFile(fileobj=io.BytesIO(body)).read()
