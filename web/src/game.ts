@@ -17,6 +17,7 @@ const MIN_LANE_M = 100;
 const EASY_MIN_M = 1500; // 簡單 = arterial/secondary AND at least this long
 const MEDIUM_MIN_M = 500; // 中等 secondary/tertiary floor
 const MEDIUM_RESID_MIN_M = 1000; // 中等 also takes long, recognizable residential roads
+const MEDIUM_MRT_MIN_M = 200; // 中等 also takes short central roads next to an MRT station
 
 // Names that aren't "find this road" material in 簡單/中等: highways,
 // tunnels, underpasses, riverside/cycle/scooter paths, levee roads.
@@ -42,10 +43,10 @@ function formatDistricts(names: string[]): string | undefined {
   return uniq.join("、");
 }
 
-/** "公館、景美一帶" from sub-district names; undefined if empty. */
+/** "捷運市政府站、光華商場附近" from references; undefined if empty. */
 function formatAreas(names: string[]): string | undefined {
   const uniq = [...new Set(names.filter(Boolean))];
-  return uniq.length ? uniq.join("、") + "一帶" : undefined;
+  return uniq.length ? uniq.join("、") + "附近" : undefined;
 }
 
 /** Prefer the finer sub-district hint; fall back to the 區 corridor. */
@@ -55,8 +56,9 @@ function areaHint(areas: string[], districts: string[]): string | undefined {
 
 /**
  * 簡單: long arterial/secondary roads, whole road (all sections light up).
- * 中等: secondary/tertiary ≥500m + long (≥1000m) recognizable residential
- *       roads, whole road — no 巷/弄, no junk names.
+ * 中等: secondary/tertiary ≥500m + long (≥1000m) residential roads +
+ *       short central roads next to an MRT station (館前路, 峨眉街…),
+ *       whole road — no 巷/弄, no junk names.
  * 困難: roads quizzed per 段, plus curated famous 巷/弄.
  * 極難: everything, per 段, 巷弄 included.
  */
@@ -65,15 +67,16 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     names: string[];
     lenByTier: Partial<Record<Tier, number>>;
     distLen: Map<string, number>; // district -> summed length, for the corridor hint
-    areaLen: Map<string, number>; // sub-district -> summed length
+    areaLen: Map<string, number>; // reference (MRT/suburb) -> summed length
     totalLen: number;
     lane: boolean;
+    nearMrt: boolean;
   }
   const bases = new Map<string, BaseAgg>();
   for (const r of roads) {
     let b = bases.get(r.base);
     if (!b) {
-      b = { names: [], lenByTier: {}, distLen: new Map(), areaLen: new Map(), totalLen: 0, lane: !!r.lane };
+      b = { names: [], lenByTier: {}, distLen: new Map(), areaLen: new Map(), totalLen: 0, lane: !!r.lane, nearMrt: false };
       bases.set(r.base, b);
     }
     b.names.push(r.name);
@@ -81,6 +84,7 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     b.lenByTier[r.tier] = (b.lenByTier[r.tier] ?? 0) + r.length_m;
     if (r.district) b.distLen.set(r.district, (b.distLen.get(r.district) ?? 0) + r.length_m);
     if (r.area) b.areaLen.set(r.area, (b.areaLen.get(r.area) ?? 0) + r.length_m);
+    if (r.near_mrt) b.nearMrt = true;
   }
   // Top-3 contributors by length — long corridors otherwise list too many.
   const byLenDesc = (m: Map<string, number>) =>
@@ -100,15 +104,19 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
+    let inMedium = false;
     if (dominant !== "hard") {
       // proper district roads (幹道/次要/tertiary)
       if (b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
-      if (b.totalLen >= MEDIUM_MIN_M) pools.medium.push(prompt);
+      if (b.totalLen >= MEDIUM_MIN_M) inMedium = true;
     } else if (b.totalLen >= MEDIUM_RESID_MIN_M) {
-      // long residential/unclassified roads are usually real arterials
-      // OSM mis-tagged (內湖路, 迪化街…); short ones stay in 困難.
-      pools.medium.push(prompt);
+      // long residential roads are usually real arterials OSM mis-tagged
+      // (內湖路, 迪化街…); short ones stay in 困難.
+      inMedium = true;
     }
+    // short central roads next to an MRT station are notable (館前路, 峨眉街)
+    if (b.nearMrt && b.totalLen >= MEDIUM_MRT_MIN_M) inMedium = true;
+    if (inMedium) pools.medium.push(prompt);
   }
   for (const r of roads) {
     const single: Prompt = {

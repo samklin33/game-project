@@ -15,7 +15,8 @@ export interface RoadProps {
   lane?: boolean; // 巷/弄
   famous?: boolean; // curated famous lane
   district?: string; // 區 of this feature's representative point
-  area?: string; // nearest sub-district place name (天母, 木柵…), if any
+  area?: string; // nearest reference: MRT station / suburb / landmark, if any
+  near_mrt?: boolean; // within ~350m of an MRT station (a central road)
 }
 
 const HIGHLIGHT_STATES = ["correct", "wrong", "reveal"] as const;
