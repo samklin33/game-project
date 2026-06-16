@@ -1,5 +1,12 @@
 import type { Difficulty, SessionOptions } from "./game";
 
+export interface City {
+  id: string;
+  name: string;
+  osm: string;
+  file: string;
+}
+
 const ROUND_CHOICES = [10, 20, 50];
 const ATTEMPT_CHOICES: { label: string; value: number }[] = [
   { label: "3", value: 3 },
@@ -135,10 +142,42 @@ export class GameUI {
     this.toastTimer = window.setTimeout(() => (this.toast.hidden = true), ms);
   }
 
+  /** Full-screen city picker. */
+  showCitySelect(opts: { cities: City[]; current: string; onPick: (c: City) => void }): void {
+    const buttons = opts.cities
+      .map(
+        (c) =>
+          `<button class="city${c.id === opts.current ? " sel" : ""}" data-city="${c.id}">${c.name}</button>`,
+      )
+      .join("");
+    this.overlay.innerHTML = `
+      <div class="panel">
+        <h1 class="logo">找路</h1>
+        <p class="tagline">選一個城市開始</p>
+        <div class="city-grid">${buttons}</div>
+      </div>
+    `;
+    this.overlay.hidden = false;
+    this.overlay.querySelectorAll<HTMLButtonElement>(".city").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const c = opts.cities.find((x) => x.id === btn.dataset.city);
+        if (c) opts.onPick(c);
+      }),
+    );
+  }
+
+  /** Transient loading panel shown while a city's data downloads. */
+  showLoading(text: string): void {
+    this.overlay.innerHTML = `<div class="panel"><div class="loading">${text}</div></div>`;
+    this.overlay.hidden = false;
+  }
+
   showStart(opts: {
+    cityName: string;
     counts: Record<Difficulty, number>;
     defaults: SessionOptions;
     onPick: (d: Difficulty, session: SessionOptions) => void;
+    onChangeCity: () => void;
   }): void {
     const chosen: SessionOptions = { ...opts.defaults };
     const buttons = (Object.keys(TIER_LABELS) as Difficulty[])
@@ -159,6 +198,7 @@ export class GameUI {
     ).join("");
     this.overlay.innerHTML = `
       <div class="panel">
+        <button class="city-switch" id="change-city">${opts.cityName} ▾</button>
         <h1 class="logo">找路</h1>
         <p class="tagline">地圖給你路名,你來指出它在哪</p>
         <div class="opt-row"><span class="opt-label">題數</span>${roundChips}</div>
@@ -167,6 +207,7 @@ export class GameUI {
       </div>
     `;
     this.overlay.hidden = false;
+    this.must("#change-city").addEventListener("click", () => opts.onChangeCity());
     const select = (btn: HTMLButtonElement) => {
       btn.parentElement!.querySelectorAll(".chip").forEach((c) => c.classList.remove("sel"));
       btn.classList.add("sel");

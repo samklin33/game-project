@@ -7,7 +7,9 @@ import {
   clearRoadState,
   distanceToFeaturesM,
   featuresBounds,
+  hasRoadSource,
   roadsAtPoint,
+  setRoadData,
   setRoadState,
   setVisibilityFilter,
   type RoadProps,
@@ -16,14 +18,13 @@ import {
   buildPools,
   Session,
   type Difficulty,
+  type Prompt,
   type SessionOptions,
   type TapOutcome,
 } from "./game";
-import { GameUI } from "./ui";
+import { GameUI, type City } from "./ui";
 
-// Taipei bounds per SPEC §5, with margin for maxBounds.
-export const TAIPEI_BOUNDS: [number, number, number, number] = [121.45, 24.96, 121.67, 25.21];
-const MARGIN = 0.05;
+const MARGIN = 0.05; // maxBounds padding around a city, in degrees
 
 export function createMap(container: string | HTMLElement): maplibregl.Map {
   return new maplibregl.Map({
@@ -40,54 +41,45 @@ export function createMap(container: string | HTMLElement): maplibregl.Map {
         },
       },
       layers: [
-        // Positron-toned backdrop so missing/loading tiles aren't a void
         { id: "bg", type: "background", paint: { "background-color": "#f7f7f5" } },
         { id: "basemap", type: "raster", source: "basemap" },
       ],
     },
-    bounds: TAIPEI_BOUNDS,
-    maxBounds: [
-      [TAIPEI_BOUNDS[0] - MARGIN, TAIPEI_BOUNDS[1] - MARGIN],
-      [TAIPEI_BOUNDS[2] + MARGIN, TAIPEI_BOUNDS[3] + MARGIN],
-    ],
+    center: [121.0, 23.7], // Taiwan-wide until a city is chosen
+    zoom: 6.5,
   });
 }
 
-export async function loadRoads(city = "taipei"): Promise<GeoJSON.FeatureCollection> {
-  const res = await fetch(
-    `${import.meta.env.BASE_URL}${city}.geojson?v=${__DATA_VERSION__}`,
-  );
-  if (!res.ok) throw new Error(`failed to load road data: ${res.status}`);
+async function fetchJSON<T>(path: string): Promise<T> {
+  const res = await fetch(`${import.meta.env.BASE_URL}${path}?v=${__DATA_VERSION__}`);
+  if (!res.ok) throw new Error(`failed to load ${path}: ${res.status}`);
   return res.json();
 }
 
-function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
+export const loadCities = () => fetchJSON<City[]>("cities.json");
+export const loadRoads = (file: string) => fetchJSON<GeoJSON.FeatureCollection>(file);
+
+function setupGame(map: maplibregl.Map, cities: City[]): void {
   const ui = new GameUI(document.getElementById("ui")!);
-  const featuresByName = new Map<string, GeoJSON.Feature>();
-  const baseToNames = new Map<string, string[]>();
-  for (const f of data.features) {
-    const p = f.properties as RoadProps;
-    featuresByName.set(p.name, f);
-    const siblings = baseToNames.get(p.base);
-    if (siblings) siblings.push(p.name);
-    else baseToNames.set(p.base, [p.name]);
-  }
-  const pools = buildPools(data.features.map((f) => f.properties as RoadProps));
-  const counts = Object.fromEntries(
-    Object.entries(pools).map(([d, pool]) => [d, pool.length]),
-  ) as Record<Difficulty, number>;
+  const CITY_KEY = "zhaolu-city";
+  const OPTS_KEY = "zhaolu-session-opts";
+
+  // Per-city state, rebuilt on every city switch.
+  let featuresByName = new Map<string, GeoJSON.Feature>();
+  let baseToNames = new Map<string, string[]>();
+  let pools: Record<Difficulty, Prompt[]> = { easy: [], medium: [], hard: [], extreme: [] };
+  let counts = { easy: 0, medium: 0, hard: 0, extreme: 0 } as Record<Difficulty, number>;
+  let poolBases = { easy: [] as string[], medium: [] as string[] };
+  let city: City = cities[0];
 
   let session: Session | null = null;
   let difficulty: Difficulty = "easy";
   let locked = false;
-  const poolBases = { easy: pools.easy.map((p) => p.label), medium: pools.medium.map((p) => p.label) };
 
-  const OPTS_KEY = "zhaolu-session-opts";
   let sessionOpts: SessionOptions = { rounds: 10, maxAttempts: 3 };
   try {
     const saved = JSON.parse(localStorage.getItem(OPTS_KEY) ?? "");
     if (typeof saved.rounds === "number") sessionOpts.rounds = saved.rounds;
-    // Infinity doesn't survive JSON — null means unlimited
     sessionOpts.maxAttempts = saved.maxAttempts === null ? Infinity : saved.maxAttempts;
   } catch {
     /* first visit */
@@ -104,12 +96,59 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   const targetFeatures = (p: { targets: string[] }) =>
     p.targets.map((n) => featuresByName.get(n)).filter((f): f is GeoJSON.Feature => !!f);
 
+  async function loadCity(c: City): Promise<void> {
+    const data = await loadRoads(c.file);
+    city = c;
+    localStorage.setItem(CITY_KEY, c.id);
+    if (hasRoadSource(map)) setRoadData(map, data);
+    else addRoadLayers(map, data);
+
+    featuresByName = new Map();
+    baseToNames = new Map();
+    for (const f of data.features) {
+      const p = f.properties as RoadProps;
+      featuresByName.set(p.name, f);
+      const sib = baseToNames.get(p.base);
+      if (sib) sib.push(p.name);
+      else baseToNames.set(p.base, [p.name]);
+    }
+    pools = buildPools(data.features.map((f) => f.properties as RoadProps));
+    counts = Object.fromEntries(
+      Object.entries(pools).map(([d, pool]) => [d, pool.length]),
+    ) as Record<Difficulty, number>;
+    poolBases = { easy: pools.easy.map((p) => p.label), medium: pools.medium.map((p) => p.label) };
+
+    // Lock the view to this city's extent.
+    const b = featuresBounds(data.features);
+    map.setMaxBounds(null);
+    map.fitBounds(b, { padding: 20, duration: 0 });
+    map.setMaxBounds([
+      [b[0][0] - MARGIN, b[0][1] - MARGIN],
+      [b[1][0] + MARGIN, b[1][1] + MARGIN],
+    ]);
+  }
+
+  const showCitySelect = () => {
+    session = null;
+    ui.hidePrompt();
+    ui.showCitySelect({
+      cities,
+      current: city.id,
+      onPick: async (c) => {
+        ui.showLoading(`載入${c.name}…`);
+        await loadCity(c);
+        showStart();
+      },
+    });
+  };
+
   const showStart = () => {
     session = null;
     ui.hidePrompt();
     clearAllRoadStates(map);
     setVisibilityFilter(map, "all", poolBases);
     ui.showStart({
+      cityName: city.name,
       counts,
       defaults: sessionOpts,
       onPick: (d, chosen) => {
@@ -117,6 +156,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
         saveOpts();
         begin(d);
       },
+      onChangeCity: showCitySelect,
     });
   };
 
@@ -153,11 +193,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   const handleReveal = (outcome: Extract<TapOutcome, { kind: "reveal" }>) => {
     locked = true;
     for (const name of outcome.targets) setRoadState(map, name, "reveal");
-    map.fitBounds(featuresBounds(targetFeatures(outcome)), {
-      padding: 80,
-      maxZoom: 15,
-      duration: 900,
-    });
+    map.fitBounds(featuresBounds(targetFeatures(outcome)), { padding: 80, maxZoom: 15, duration: 900 });
     ui.flashReveal(outcome.label);
     ui.setScore(session!.points, session!.streak);
     window.setTimeout(next, 3000);
@@ -175,9 +211,6 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
         window.setTimeout(next, 1200);
         break;
       case "wrong": {
-        // 簡單/中等 quiz whole roads, so name and flash the whole road —
-        // being told 「這是忠孝東路四段」 when sections aren't in play
-        // is confusing.
         const grouped = difficulty === "easy" || difficulty === "medium";
         const base = (featuresByName.get(outcome.name)?.properties as RoadProps | undefined)?.base;
         const label = grouped && base ? base : outcome.name;
@@ -208,17 +241,22 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   };
   ui.onQuit = showStart;
 
-  showStart();
+  // Boot: restore last city if still available, else show the picker.
+  const lastId = localStorage.getItem(CITY_KEY);
+  const last = cities.find((c) => c.id === lastId);
+  if (last) {
+    ui.showLoading(`載入${last.name}…`);
+    loadCity(last).then(showStart);
+  } else {
+    showCitySelect();
+  }
 }
 
 const map = createMap("map");
-// Rotation only disorients on a memorization game — lock to north-up.
 map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
-// e2e handle
 (window as unknown as { __map: maplibregl.Map }).__map = map;
 map.on("load", async () => {
-  const data = await loadRoads();
-  addRoadLayers(map, data);
-  setupGame(map, data);
+  const cities = await loadCities();
+  setupGame(map, cities);
 });
