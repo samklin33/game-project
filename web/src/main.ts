@@ -112,7 +112,7 @@ function setupGame(map: maplibregl.Map, cities: City[]): void {
       if (sib) sib.push(p.name);
       else baseToNames.set(p.base, [p.name]);
     }
-    pools = buildPools(data.features.map((f) => f.properties as RoadProps));
+    pools = buildPools(data.features);
     counts = Object.fromEntries(
       Object.entries(pools).map(([d, pool]) => [d, pool.length]),
     ) as Record<Difficulty, number>;

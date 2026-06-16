@@ -18,6 +18,12 @@ const EASY_MIN_M = 1500; // 簡單 = arterial/secondary AND at least this long
 const MEDIUM_MIN_M = 500; // 中等 secondary/tertiary floor
 const MEDIUM_RESID_MIN_M = 1000; // 中等 also takes long, recognizable residential roads
 const MEDIUM_MRT_MIN_M = 200; // 中等 also takes short central roads next to an MRT station
+// "Urban-ness": avg number of distinct roads sharing a ~250m cell with this
+// road. Mountain/rural roads sit near ~1; urban arterials 3-12. A floor on
+// this keeps 簡單/中等 to inhabited grids (works for no-MRT 五股/泰山/林口
+// too) and drops isolated hill roads. Cheap to retune — no data rebuild.
+const DENSITY_CELL = 0.0025;
+const DENSITY_MIN = 2.0;
 
 // Names that aren't "find this road" material in 簡單/中等: highways,
 // tunnels, underpasses, riverside/cycle/scooter paths, levee roads.
@@ -62,7 +68,37 @@ function areaHint(areas: string[], districts: string[]): string | undefined {
  * 困難: roads quizzed per 段, plus curated famous 巷/弄.
  * 極難: everything, per 段, 巷弄 included.
  */
-export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
+export function buildPools(features: GeoJSON.Feature[]): Record<Difficulty, Prompt[]> {
+  const roads = features.map((f) => f.properties as RoadProps);
+
+  // Density grid: per ~250m cell, the set of distinct base roads passing
+  // through it. A base's urban-ness = avg distinct roads over its cells.
+  const cellRoads = new Map<string, Set<string>>();
+  const baseCells = new Map<string, Set<string>>();
+  for (const f of features) {
+    const base = (f.properties as RoadProps).base;
+    const geom = f.geometry;
+    if (geom.type !== "MultiLineString") continue;
+    let bc = baseCells.get(base);
+    if (!bc) baseCells.set(base, (bc = new Set()));
+    for (const line of geom.coordinates) {
+      for (const [x, y] of line) {
+        const key = `${Math.floor(x / DENSITY_CELL)},${Math.floor(y / DENSITY_CELL)}`;
+        bc.add(key);
+        let cr = cellRoads.get(key);
+        if (!cr) cellRoads.set(key, (cr = new Set()));
+        cr.add(base);
+      }
+    }
+  }
+  const baseDensity = (base: string): number => {
+    const cells = baseCells.get(base);
+    if (!cells || cells.size === 0) return 0;
+    let sum = 0;
+    for (const c of cells) sum += cellRoads.get(c)!.size;
+    return sum / cells.size;
+  };
+
   interface BaseAgg {
     names: string[];
     lenByTier: Partial<Record<Tier, number>>;
@@ -104,18 +140,23 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
+    // Urban = embedded in a dense road grid, or next to an MRT station.
+    // Keeps no-MRT urban districts (五股/泰山/林口), drops isolated hill roads.
+    const urban = b.nearMrt || baseDensity(base) >= DENSITY_MIN;
     let inMedium = false;
-    if (dominant !== "hard") {
-      // proper district roads (幹道/次要/tertiary)
-      if (b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
-      if (b.totalLen >= MEDIUM_MIN_M) inMedium = true;
-    } else if (b.totalLen >= MEDIUM_RESID_MIN_M) {
-      // long residential roads are usually real arterials OSM mis-tagged
-      // (內湖路, 迪化街…); short ones stay in 困難.
-      inMedium = true;
+    if (urban) {
+      if (dominant !== "hard") {
+        // proper district roads (幹道/次要/tertiary)
+        if (b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
+        if (b.totalLen >= MEDIUM_MIN_M) inMedium = true;
+      } else if (b.totalLen >= MEDIUM_RESID_MIN_M) {
+        // long residential roads are usually real arterials OSM mis-tagged
+        // (內湖路, 迪化街…); short ones stay in 困難.
+        inMedium = true;
+      }
+      // short central roads next to an MRT station are notable (館前路, 峨眉街)
+      if (b.nearMrt && b.totalLen >= MEDIUM_MRT_MIN_M) inMedium = true;
     }
-    // short central roads next to an MRT station are notable (館前路, 峨眉街)
-    if (b.nearMrt && b.totalLen >= MEDIUM_MRT_MIN_M) inMedium = true;
     if (inMedium) pools.medium.push(prompt);
   }
   for (const r of roads) {
@@ -170,9 +211,10 @@ export class Session {
   attempts = 0;
   hintUsed = false;
   target: Prompt | null = null;
-  // Prompts bucketed by district; each round picks a random non-empty
-  // district then a random road in it, so large districts (士林, 北投)
-  // don't dominate the questions.
+  // Prompts bucketed by district; each round picks a district weighted by
+  // size^0.5 then a random road in it. The sqrt dampens both extremes:
+  // big districts (士林) don't dominate, and tiny rural ones (石門, 1 road)
+  // don't get equal airtime to 板橋 (which made 簡單 feel mountain-heavy).
   private buckets: Prompt[][];
 
   constructor(pool: Prompt[], opts: SessionOptions = { rounds: 10, maxAttempts: MAX_ATTEMPTS }) {
@@ -201,7 +243,12 @@ export class Session {
     this.round += 1;
     this.attempts = 0;
     this.hintUsed = false;
-    const bucket = this.buckets[Math.floor(Math.random() * this.buckets.length)];
+    // Weighted pick: P(district) ∝ remaining size^0.5.
+    const weights = this.buckets.map((b) => Math.sqrt(b.length));
+    let r = Math.random() * weights.reduce((a, w) => a + w, 0);
+    let i = 0;
+    while (i < weights.length - 1 && (r -= weights[i]) >= 0) i++;
+    const bucket = this.buckets[i];
     this.target = bucket.pop()!; // bucket was shuffled at construction
     return this.target;
   }
