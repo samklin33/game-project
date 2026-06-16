@@ -44,6 +44,17 @@ rel(area.city)["admin_level"="7"]["boundary"="administrative"];
 out geom;
 """
 
+# Sub-district place names (天母, 木柵, 景美…) for a finer area hint than 區.
+PLACE_QUERY_TEMPLATE = """\
+[out:json][timeout:120];
+area["name"="{city}"]["admin_level"="4"]->.city;
+node(area.city)["place"~"^(suburb|neighbourhood|quarter|town|village|hamlet)$"]["name"];
+out;
+"""
+
+# A road's nearest place node beyond this is too far to be a useful label.
+AREA_MAX_M = 2500
+
 # SPEC §1: 簡單 = arterials, 中等 = district roads, 困難 = 巷弄 hell.
 TIER_BY_CLASS = {
     "trunk": "easy",
@@ -68,7 +79,8 @@ SECTION_RE = re.compile(r"^(.+?)([一二三四五六七八九十]+|[0-9]+)段$")
 # roads, elevated/underpass doubles of surface roads. They also pollute
 # hit-testing by shadowing the road they ride on.
 EXCLUDE_RE = re.compile(
-    r"(專用道|匝道|引道|連絡道|聯絡道|側車道|便道|地下車道|車行地下道|高架道路|高架橋|戰備)"
+    r"(專用道|匝道|引道|連絡道|聯絡道|側車道|便道|地下車道|車行地下道|高架道路|高架橋|戰備"
+    r"|機慢車道|慢車道|機車道|自行車道|堤外|河濱|越堤)"
 )
 
 # Long but obscure — kept in the data (they're real roads) but barred
@@ -226,6 +238,31 @@ def assign_district(
     return best
 
 
+def parse_places(elements: list[dict]) -> list[tuple[str, float, float]]:
+    """[(name, lon, lat), ...] from place=suburb/neighbourhood/... nodes."""
+    places = []
+    for el in elements:
+        if el.get("type") != "node":
+            continue
+        name = el.get("tags", {}).get("name")
+        if name and "lon" in el and "lat" in el:
+            places.append((name, el["lon"], el["lat"]))
+    return places
+
+
+def assign_area(
+    point: list[float], places: list[tuple[str, float, float]]
+) -> str | None:
+    """Nearest place name, or None if the closest is farther than AREA_MAX_M."""
+    x, y = point
+    best, best_d = None, float("inf")
+    for name, px, py in places:
+        d = haversine_m(x, y, px, py)
+        if d < best_d:
+            best_d, best = d, name
+    return best if best_d <= AREA_MAX_M else None
+
+
 def representative_point(lines: list[list[list[float]]]) -> list[float]:
     """Midpoint of the longest segment — a stable interior-ish point."""
     longest = max(lines, key=line_length_m)
@@ -235,6 +272,7 @@ def representative_point(lines: list[list[list[float]]]) -> list[float]:
 def build_features(
     elements: list[dict],
     districts: list[tuple[str, list[list[list[float]]]]] | None = None,
+    places: list[tuple[str, float, float]] | None = None,
 ) -> list[dict]:
     # One feature per full road name *including* 段, so the game can quiz
     # sections separately in 困難/極難 and group by `base` in 簡單/中等.
@@ -277,10 +315,16 @@ def build_features(
             props["lane"] = True
         if name in famous:
             props["famous"] = True
-        if districts:
-            district = assign_district(representative_point(road["lines"]), districts)
-            if district:
-                props["district"] = district
+        if districts or places:
+            rep = representative_point(road["lines"])
+            if districts:
+                district = assign_district(rep, districts)
+                if district:
+                    props["district"] = district
+            if places:
+                area = assign_area(rep, places)
+                if area:
+                    props["area"] = area
         features.append(
             {
                 "type": "Feature",
@@ -336,6 +380,7 @@ def print_stats(features: list[dict]) -> None:
             extreme += 1
 
     with_district = sum(1 for f in features if f["properties"].get("district"))
+    with_area = sum(1 for f in features if f["properties"].get("area"))
     print("\nPrompt pool per difficulty:")
     print(f"  簡單 (easy):    {easy:5d} 幹道")
     print(f"  中等 (medium):  {medium:5d} 區域道路(≥500m,不含巷弄/住宅路/雜路)")
@@ -343,6 +388,7 @@ def print_stats(features: list[dict]) -> None:
     print(f"  極難 (extreme): {extreme:5d} 全部(含巷弄)")
     print(f"  Total features: {len(features)} ({len(bases)} base roads)")
     print(f"  District hint coverage: {with_district}/{len(features)}")
+    print(f"  Area (sub-district) hint coverage: {with_area}/{len(features)}")
 
 
 def main() -> None:
@@ -365,7 +411,15 @@ def main() -> None:
     except SystemExit as e:
         print(f"District fetch failed, continuing without hints: {e}", file=sys.stderr)
 
-    features = build_features(raw.get("elements", []), districts)
+    places: list[tuple[str, float, float]] = []
+    try:
+        praw = fetch_overpass(PLACE_QUERY_TEMPLATE.format(city=args.city))
+        places = parse_places(praw.get("elements", []))
+        print(f"Parsed {len(places)} place nodes", file=sys.stderr)
+    except SystemExit as e:
+        print(f"Place fetch failed, continuing without area hints: {e}", file=sys.stderr)
+
+    features = build_features(raw.get("elements", []), districts, places)
 
     geojson = {"type": "FeatureCollection", "features": features}
     with open(args.out, "w", encoding="utf-8") as f:
