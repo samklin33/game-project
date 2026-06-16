@@ -153,8 +153,8 @@ export class GameUI {
     this.overlay.innerHTML = `
       <div class="panel">
         <h1 class="logo">找路</h1>
-        <p class="tagline">選一個城市開始</p>
-        <div class="city-grid">${buttons}</div>
+        <p class="tagline">選擇城市</p>
+        ${buttons}
       </div>
     `;
     this.overlay.hidden = false;
