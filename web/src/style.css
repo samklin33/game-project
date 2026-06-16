@@ -142,35 +142,21 @@ body {
   color: #fff;
 }
 
-.city-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-top: 14px;
-}
-
+/* City buttons reuse the difficulty design language: full-width flat
+   rounded pills, stacked. */
 .panel button.city {
-  margin: 0;
-  padding: 18px 10px;
+  display: block;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 14px;
   font-size: 19px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: #fff;
-  background: linear-gradient(160deg, #0f766e, #0c5e57);
-  border: none;
-  border-radius: 16px;
-  box-shadow: 0 3px 0 #0a4f49, 0 4px 10px rgba(15, 118, 110, 0.25);
-  transition: transform 0.05s ease;
-}
-
-.panel button.city:active {
-  transform: translateY(2px);
-  box-shadow: 0 1px 0 #0a4f49;
+  background: #0f766e;
 }
 
 .panel button.city.sel {
-  background: linear-gradient(160deg, #0f172a, #1e293b);
-  box-shadow: 0 3px 0 #020617;
+  background: #0f172a;
 }
 
 .city-switch {
