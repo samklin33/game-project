@@ -67,7 +67,7 @@ out;
 """
 
 MRT_HINT_MAX_M = 600   # show 捷運X站 when a station is this close
-MRT_CENTRAL_MAX_M = 350  # road counts as central (→中等) if this close to MRT
+MRT_CENTRAL_MAX_M = 400  # road counts as central (→中等) if any part is this close to MRT
 AREA_MAX_M = 1500      # suburb/quarter fallback radius
 
 # Modernize / drop obscure historical suburb names.
@@ -302,17 +302,29 @@ def assign_hint(
     point: list[float],
     stations: list[tuple[str, float, float]],
     places: list[tuple[str, float, float]],
-) -> tuple[str | None, bool]:
-    """Return (area_display, near_mrt). Prefer a nearby MRT station, else a
-    suburb/quarter; near_mrt marks roads close enough to count as central."""
+) -> str | None:
+    """Area label for the rep point: nearest MRT (≤600m) else suburb (≤1.5km)."""
     mrt, mrt_d = _nearest(point, stations)
-    area, area_d = _nearest(point, places)
-    near_mrt = mrt_d <= MRT_CENTRAL_MAX_M
     if mrt and mrt_d <= MRT_HINT_MAX_M:
-        return mrt, near_mrt
-    if area and area_d <= AREA_MAX_M:
-        return area, near_mrt
-    return None, near_mrt
+        return mrt
+    area, area_d = _nearest(point, places)
+    return area if area and area_d <= AREA_MAX_M else None
+
+
+def near_any_station(
+    lines: list[list[list[float]]], stations: list[tuple[str, float, float]]
+) -> bool:
+    """True if any vertex of the road is within MRT_CENTRAL_MAX_M of a station.
+    Whole-geometry (not just the rep point) so short roads whose midpoint sits
+    at a far end (峨眉街) still register as central."""
+    deg = MRT_CENTRAL_MAX_M / 111000 + 0.0005  # bbox prefilter margin
+    for line in lines:
+        for x, y in line:
+            for _, px, py in stations:
+                if abs(py - y) <= deg and abs(px - x) <= deg:
+                    if haversine_m(x, y, px, py) <= MRT_CENTRAL_MAX_M:
+                        return True
+    return False
 
 
 def representative_point(lines: list[list[list[float]]]) -> list[float]:
@@ -374,10 +386,10 @@ def build_features(
                 district = assign_district(rep, districts)
                 if district:
                     props["district"] = district
-            area, near_mrt = assign_hint(rep, stations or [], places or [])
+            area = assign_hint(rep, stations or [], places or [])
             if area:
                 props["area"] = area
-            if near_mrt:
+            if stations and near_any_station(road["lines"], stations):
                 props["near_mrt"] = True
         features.append(
             {
