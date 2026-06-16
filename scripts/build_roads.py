@@ -50,7 +50,7 @@ out geom;
 PLACE_QUERY_TEMPLATE = """\
 [out:json][timeout:120];
 area["name"="{city}"]["admin_level"="4"]->.city;
-node(area.city)["place"~"^(suburb|quarter)$"]["name"];
+node(area.city)["place"="suburb"]["name"];
 out;
 """
 
