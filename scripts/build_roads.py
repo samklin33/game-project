@@ -334,11 +334,17 @@ def representative_point(lines: list[list[list[float]]]) -> list[float]:
     return longest[len(longest) // 2]
 
 
+# Connectivity tolerance: with the ±1 neighbour check below, any two
+# vertices within this many degrees per axis (~130m) are unioned. Bridges
+# OSM gaps in one road without merging same-named roads in different towns.
+CLUSTER_CELL_DEG = 0.0012
+
+
 def cluster_ways(ways: list[dict]) -> list[list[dict]]:
-    """Group ways into connected components (sharing any rounded vertex).
-    Same-named but physically separate roads (新北's many 中山路) land in
-    different components; a continuous road across districts (忠孝東路)
-    stays one component."""
+    """Group ways into connected roads. Ways whose vertices fall in the same
+    or adjacent grid cell are unioned, so a fragmented-but-continuous road
+    (or one across districts, 忠孝東路) stays one, while same-named roads in
+    different areas (新北's many 中山路) split apart."""
     n = len(ways)
     parent = list(range(n))
 
@@ -353,15 +359,20 @@ def cluster_ways(ways: list[dict]) -> list[list[dict]]:
         if ra != rb:
             parent[ra] = rb
 
-    node_first: dict[tuple[float, float], int] = {}
+    cell_owner: dict[tuple[int, int], int] = {}
     for i, w in enumerate(ways):
-        for pt in w["coords"]:
-            key = (pt[0], pt[1])
-            j = node_first.get(key)
-            if j is None:
-                node_first[key] = i
-            else:
-                union(i, j)
+        cells = {
+            (int(pt[0] / CLUSTER_CELL_DEG), int(pt[1] / CLUSTER_CELL_DEG))
+            for pt in w["coords"]
+        }
+        for cx, cy in cells:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    owner = cell_owner.get((cx + dx, cy + dy))
+                    if owner is not None:
+                        union(i, owner)
+        for c in cells:
+            cell_owner[c] = i
     groups: dict[int, list[dict]] = defaultdict(list)
     for i, w in enumerate(ways):
         groups[find(i)].append(w)
