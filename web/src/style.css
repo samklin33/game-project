@@ -142,6 +142,43 @@ body {
   color: #fff;
 }
 
+.city-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.panel button.city {
+  margin: 0;
+  padding: 16px 8px;
+  font-size: 18px;
+  font-weight: 700;
+  background: #0f766e;
+}
+
+.panel button.city.sel {
+  background: #0f172a;
+}
+
+.city-switch {
+  background: #e2e8f0;
+  color: #0f172a;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.loading {
+  padding: 28px 12px;
+  font-size: 17px;
+  color: #334155;
+}
+
 .panel .dim {
   font-size: 20px;
   color: #94a3b8;

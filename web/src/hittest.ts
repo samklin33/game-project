@@ -1,4 +1,4 @@
-import type { Map as MlMap, MapGeoJSONFeature, PointLike } from "maplibre-gl";
+import type { Map as MlMap, MapGeoJSONFeature, PointLike, GeoJSONSource } from "maplibre-gl";
 
 export const SOURCE_ID = "roads";
 export const VISIBLE_LAYER = "roads-visible";
@@ -85,6 +85,15 @@ export function setVisibilityFilter(
     null;
   map.setFilter(VISIBLE_LAYER, filter as never);
   map.setFilter(HIT_LAYER, filter as never);
+}
+
+/** Swap the road data in place (city switch) without re-adding layers. */
+export function setRoadData(map: MlMap, data: GeoJSON.FeatureCollection): void {
+  (map.getSource(SOURCE_ID) as GeoJSONSource).setData(data);
+}
+
+export function hasRoadSource(map: MlMap): boolean {
+  return !!map.getSource(SOURCE_ID);
 }
 
 /** Resolve a tap to road names; tolerant 8px-bbox retry per SPEC §4. */
