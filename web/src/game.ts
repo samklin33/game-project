@@ -2,17 +2,26 @@ import type { RoadProps, Tier } from "./hittest";
 
 export type Difficulty = "easy" | "medium" | "hard" | "extreme";
 
-/** One quiz item: the label shown, and which feature names count/light up. */
+/** One quiz item: the label shown, which feature names count/light up,
+ *  the area hint, and the primary district (for balanced selection). */
 export interface Prompt {
   label: string;
   targets: string[];
-  hint?: string; // district(s) the road passes through, e.g. 大安、信義區
+  hint?: string;
+  district?: string;
 }
 
 export const MAX_ATTEMPTS = 3;
 const MIN_ROAD_M = 150;
 const MIN_LANE_M = 100;
-const MEDIUM_MIN_M = 500; // 中等 floor — drop obscure sub-500m stubs
+const EASY_MIN_M = 1500; // 簡單 = arterial/secondary AND at least this long
+const MEDIUM_MIN_M = 500; // 中等 secondary/tertiary floor
+const MEDIUM_RESID_MIN_M = 1000; // 中等 also takes long, recognizable residential roads
+
+// Names that aren't "find this road" material in 簡單/中等: highways,
+// tunnels, underpasses, riverside/cycle/scooter paths, levee roads.
+const JUNK_NAME =
+  /(公路|隧道|地下道|高架|戰備|產業道路|機慢車道|慢車道|機車道|自行車|堤外|河濱|越堤|步道|人行|便道|登山)/;
 
 // Scoring by attempt number (0-indexed): 1st correct tap = 10, then
 // 8/5/3/1, flooring at 1 for any later attempt. A used hint caps the
@@ -21,14 +30,6 @@ const ATTEMPT_POINTS = [10, 8, 5, 3, 1];
 const HINT_POINTS = 3;
 const pointsForAttempt = (attempt: number): number =>
   ATTEMPT_POINTS[Math.min(attempt, ATTEMPT_POINTS.length - 1)];
-// 簡單: prominent = arterial-or-secondary class AND at least this long.
-// Pure trunk/primary is only ~40 roads in Taipei because OSM tags famous
-// streets like 信義路/南京東路 as secondary — too thin a pool on its own.
-const EASY_MIN_M = 1500;
-// Long ≠ famous: hill highways, tunnels, service roads are barred from
-// 簡單 even when they pass the length bar (中湖戰備道路, 陽金公路…).
-// Mirrored in scripts/build_roads.py stats.
-const EASY_EXCLUDE = /(公路|隧道|地下道|高架|戰備|產業道路)/;
 
 /** "大安、信義、松山區" from ["大安區","信義區","松山區"]; undefined if empty. */
 function formatDistricts(names: string[]): string | undefined {
@@ -43,7 +44,8 @@ function formatDistricts(names: string[]): string | undefined {
 
 /**
  * 簡單: long arterial/secondary roads, whole road (all sections light up).
- * 中等: roads ≥500m, whole road — no 巷/弄, no junk names.
+ * 中等: secondary/tertiary ≥500m + long (≥1000m) recognizable residential
+ *       roads, whole road — no 巷/弄, no junk names.
  * 困難: roads quizzed per 段, plus curated famous 巷/弄.
  * 極難: everything, per 段, 巷弄 included.
  */
@@ -72,22 +74,32 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
   for (const [base, b] of bases) {
     if (b.lane) continue;
     const corridor = [...b.distLen.entries()].sort((a, c) => c[1] - a[1]).map((e) => e[0]);
-    const prompt: Prompt = { label: base, targets: b.names, hint: formatDistricts(corridor) };
+    const prompt: Prompt = {
+      label: base,
+      targets: b.names,
+      hint: formatDistricts(corridor),
+      district: corridor[0],
+    };
+    if (JUNK_NAME.test(base)) continue;
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
       c[1] > a[1] ? c : a,
     )[0];
-    const notJunk = !EASY_EXCLUDE.test(base);
-    // 中等/簡單 are proper district roads (幹道/次要/tertiary). Residential
-    // & unclassified — mountain tracks, remote bridges — belong to 困難.
-    if (dominant === "hard") continue;
-    if (b.totalLen >= EASY_MIN_M && notJunk) pools.easy.push(prompt);
-    if (b.totalLen >= MEDIUM_MIN_M && notJunk) pools.medium.push(prompt);
+    if (dominant !== "hard") {
+      // proper district roads (幹道/次要/tertiary)
+      if (b.totalLen >= EASY_MIN_M) pools.easy.push(prompt);
+      if (b.totalLen >= MEDIUM_MIN_M) pools.medium.push(prompt);
+    } else if (b.totalLen >= MEDIUM_RESID_MIN_M) {
+      // long residential/unclassified roads are usually real arterials
+      // OSM mis-tagged (內湖路, 迪化街…); short ones stay in 困難.
+      pools.medium.push(prompt);
+    }
   }
   for (const r of roads) {
     const single: Prompt = {
       label: r.name,
       targets: [r.name],
       hint: formatDistricts(r.district ? [r.district] : []),
+      district: r.district,
     };
     if (r.lane) {
       if (r.famous) {
@@ -115,6 +127,14 @@ export interface SessionOptions {
   maxAttempts: number; // Infinity = only 看答案 ends a round
 }
 
+function shuffle<T>(a: T[]): T[] {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export class Session {
   readonly totalRounds: number;
   readonly maxAttempts: number;
@@ -126,10 +146,20 @@ export class Session {
   attempts = 0;
   hintUsed = false;
   target: Prompt | null = null;
-  private remaining: Prompt[];
+  // Prompts bucketed by district; each round picks a random non-empty
+  // district then a random road in it, so large districts (士林, 北投)
+  // don't dominate the questions.
+  private buckets: Prompt[][];
 
   constructor(pool: Prompt[], opts: SessionOptions = { rounds: 10, maxAttempts: MAX_ATTEMPTS }) {
-    this.remaining = [...pool];
+    const byDistrict = new Map<string, Prompt[]>();
+    for (const p of shuffle([...pool])) {
+      const k = p.district ?? "其他";
+      const arr = byDistrict.get(k);
+      if (arr) arr.push(p);
+      else byDistrict.set(k, [p]);
+    }
+    this.buckets = [...byDistrict.values()];
     this.totalRounds = Math.min(opts.rounds, pool.length);
     this.maxAttempts = opts.maxAttempts;
   }
@@ -139,19 +169,20 @@ export class Session {
   }
 
   nextRound(): Prompt | null {
-    if (this.round >= this.totalRounds) {
+    this.buckets = this.buckets.filter((b) => b.length > 0);
+    if (this.round >= this.totalRounds || this.buckets.length === 0) {
       this.target = null;
       return null;
     }
     this.round += 1;
     this.attempts = 0;
     this.hintUsed = false;
-    const i = Math.floor(Math.random() * this.remaining.length);
-    this.target = this.remaining.splice(i, 1)[0];
+    const bucket = this.buckets[Math.floor(Math.random() * this.buckets.length)];
+    this.target = bucket.pop()!; // bucket was shuffled at construction
     return this.target;
   }
 
-  /** Reveal the district hint; caps this round's score at 1. Returns it. */
+  /** Reveal the area hint; caps this round's score at HINT_POINTS. Returns it. */
   useHint(): string | null {
     if (!this.target?.hint) return null;
     this.hintUsed = true;
