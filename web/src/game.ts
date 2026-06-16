@@ -42,6 +42,17 @@ function formatDistricts(names: string[]): string | undefined {
   return uniq.join("、");
 }
 
+/** "公館、景美一帶" from sub-district names; undefined if empty. */
+function formatAreas(names: string[]): string | undefined {
+  const uniq = [...new Set(names.filter(Boolean))];
+  return uniq.length ? uniq.join("、") + "一帶" : undefined;
+}
+
+/** Prefer the finer sub-district hint; fall back to the 區 corridor. */
+function areaHint(areas: string[], districts: string[]): string | undefined {
+  return formatAreas(areas) ?? formatDistricts(districts);
+}
+
 /**
  * 簡單: long arterial/secondary roads, whole road (all sections light up).
  * 中等: secondary/tertiary ≥500m + long (≥1000m) recognizable residential
@@ -54,6 +65,7 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     names: string[];
     lenByTier: Partial<Record<Tier, number>>;
     distLen: Map<string, number>; // district -> summed length, for the corridor hint
+    areaLen: Map<string, number>; // sub-district -> summed length
     totalLen: number;
     lane: boolean;
   }
@@ -61,24 +73,28 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
   for (const r of roads) {
     let b = bases.get(r.base);
     if (!b) {
-      b = { names: [], lenByTier: {}, distLen: new Map(), totalLen: 0, lane: !!r.lane };
+      b = { names: [], lenByTier: {}, distLen: new Map(), areaLen: new Map(), totalLen: 0, lane: !!r.lane };
       bases.set(r.base, b);
     }
     b.names.push(r.name);
     b.totalLen += r.length_m;
     b.lenByTier[r.tier] = (b.lenByTier[r.tier] ?? 0) + r.length_m;
     if (r.district) b.distLen.set(r.district, (b.distLen.get(r.district) ?? 0) + r.length_m);
+    if (r.area) b.areaLen.set(r.area, (b.areaLen.get(r.area) ?? 0) + r.length_m);
   }
+  // Top-3 contributors by length — long corridors otherwise list too many.
+  const byLenDesc = (m: Map<string, number>) =>
+    [...m.entries()].sort((a, c) => c[1] - a[1]).slice(0, 3).map((e) => e[0]);
 
   const pools: Record<Difficulty, Prompt[]> = { easy: [], medium: [], hard: [], extreme: [] };
   for (const [base, b] of bases) {
     if (b.lane) continue;
-    const corridor = [...b.distLen.entries()].sort((a, c) => c[1] - a[1]).map((e) => e[0]);
+    const distCorridor = byLenDesc(b.distLen);
     const prompt: Prompt = {
       label: base,
       targets: b.names,
-      hint: formatDistricts(corridor),
-      district: corridor[0],
+      hint: areaHint(byLenDesc(b.areaLen), distCorridor),
+      district: distCorridor[0],
     };
     if (JUNK_NAME.test(base)) continue;
     const dominant = (Object.entries(b.lenByTier) as [Tier, number][]).reduce((a, c) =>
@@ -98,7 +114,7 @@ export function buildPools(roads: RoadProps[]): Record<Difficulty, Prompt[]> {
     const single: Prompt = {
       label: r.name,
       targets: [r.name],
-      hint: formatDistricts(r.district ? [r.district] : []),
+      hint: areaHint(r.area ? [r.area] : [], r.district ? [r.district] : []),
       district: r.district,
     };
     if (r.lane) {
