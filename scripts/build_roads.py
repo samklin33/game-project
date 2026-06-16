@@ -248,7 +248,9 @@ def parse_places(elements: list[dict]) -> list[tuple[str, float, float]]:
         if el.get("type") != "node":
             continue
         name = el.get("tags", {}).get("name")
-        if name and "lon" in el and "lat" in el:
+        # OSM also tags place nodes named after the 區 itself — skip those,
+        # they'd shadow real sub-district names and duplicate the 區 hint.
+        if name and not name.endswith("區") and "lon" in el and "lat" in el:
             places.append((name, el["lon"], el["lat"]))
     return places
 
