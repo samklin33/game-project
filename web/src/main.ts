@@ -80,7 +80,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
   let session: Session | null = null;
   let difficulty: Difficulty = "easy";
   let locked = false;
-  const easyBases = pools.easy.map((p) => p.label);
+  const poolBases = { easy: pools.easy.map((p) => p.label), medium: pools.medium.map((p) => p.label) };
 
   const OPTS_KEY = "zhaolu-session-opts";
   let sessionOpts: SessionOptions = { rounds: 10, maxAttempts: 3 };
@@ -108,7 +108,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
     session = null;
     ui.hidePrompt();
     clearAllRoadStates(map);
-    setVisibilityFilter(map, "all", easyBases);
+    setVisibilityFilter(map, "all", poolBases);
     ui.showStart({
       counts,
       defaults: sessionOpts,
@@ -122,7 +122,7 @@ function setupGame(map: maplibregl.Map, data: GeoJSON.FeatureCollection): void {
 
   const begin = (d: Difficulty) => {
     difficulty = d;
-    setVisibilityFilter(map, d, easyBases);
+    setVisibilityFilter(map, d, poolBases);
     session = new Session(pools[d], sessionOpts);
     next();
   };

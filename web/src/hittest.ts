@@ -71,12 +71,14 @@ export function addRoadLayers(map: MlMap, data: GeoJSON.FeatureCollection): void
 export function setVisibilityFilter(
   map: MlMap,
   difficulty: "easy" | "medium" | "hard" | "extreme" | "all",
-  easyBases: string[],
+  pools: { easy: string[]; medium: string[] },
 ): void {
   const notLane = ["!", ["to-boolean", ["get", "lane"]]];
+  // 簡單/中等 render exactly their prompt-pool bases, so the only roads a
+  // player can tap are ones that could be asked (no 產業道路 surprises).
   const filter =
-    difficulty === "easy" ? ["in", ["get", "base"], ["literal", easyBases]] :
-    difficulty === "medium" ? notLane :
+    difficulty === "easy" ? ["in", ["get", "base"], ["literal", pools.easy]] :
+    difficulty === "medium" ? ["in", ["get", "base"], ["literal", pools.medium]] :
     difficulty === "hard" ? ["any", notLane, ["to-boolean", ["get", "famous"]]] :
     null;
   map.setFilter(VISIBLE_LAYER, filter as never);
