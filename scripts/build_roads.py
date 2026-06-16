@@ -44,19 +44,35 @@ rel(area.city)["admin_level"="7"]["boundary"="administrative"];
 out geom;
 """
 
-# Sub-district place names (天母, 木柵, 景美…) for a finer area hint than 區.
-# Only suburb/quarter — neighbourhood/village/hamlet in Taipei are mostly
-# obscure historical micro-toponyms (番婆厝, 蜈蚣牙…), not colloquial areas.
+# Sub-district place names (天母, 木柵, 光華商場…) for a finer area hint.
+# suburb + quarter; neighbourhood/village are obscure historical names.
 PLACE_QUERY_TEMPLATE = """\
 [out:json][timeout:120];
 area["name"="{city}"]["admin_level"="4"]->.city;
-node(area.city)["place"="suburb"]["name"];
+node(area.city)["place"~"^(suburb|quarter)$"]["name"];
 out;
 """
 
-# A road's nearest suburb node beyond this is too far to trust — better to
-# fall back to the 區 hint than to label it a neighbourhood across the river.
-AREA_MAX_M = 1500
+# MRT stations — the most recognizable modern reference points. Used both
+# as the primary area hint ("捷運市政府站附近") and to mark central roads
+# (near a station) as worth including in 中等 regardless of length/class.
+MRT_QUERY_TEMPLATE = """\
+[out:json][timeout:120];
+area["name"="{city}"]["admin_level"="4"]->.city;
+(
+  node(area.city)["station"="subway"]["name"];
+  node(area.city)["railway"="station"]["subway"="yes"]["name"];
+);
+out;
+"""
+
+MRT_HINT_MAX_M = 600   # show 捷運X站 when a station is this close
+MRT_CENTRAL_MAX_M = 350  # road counts as central (→中等) if this close to MRT
+AREA_MAX_M = 1500      # suburb/quarter fallback radius
+
+# Modernize / drop obscure historical suburb names.
+AREA_RENAME = {"加蚋子": "萬華"}
+AREA_DROP = {"後巷尾"}
 
 # SPEC §1: 簡單 = arterials, 中等 = district roads, 困難 = 巷弄 hell.
 TIER_BY_CLASS = {
@@ -90,6 +106,7 @@ EXCLUDE_RE = re.compile(
 # tunnels, hill/mountain roads). Mirrors JUNK_NAME in web/src/game.ts.
 EASY_EXCLUDE_RE = re.compile(r"(公路|隧道|地下道|高架|戰備|產業道路|登山)")
 MEDIUM_RESID_MIN_M = 1000  # 中等 also takes long recognizable residential roads
+MEDIUM_MRT_MIN_M = 200  # 中等 also takes short central roads next to an MRT station
 
 # 巷/弄 famous enough to be fair game in 困難. Curated; extend freely —
 # the build prints which entries matched the OSM data.
@@ -249,24 +266,53 @@ def parse_places(elements: list[dict]) -> list[tuple[str, float, float]]:
         if el.get("type") != "node":
             continue
         name = el.get("tags", {}).get("name")
-        # OSM also tags place nodes named after the 區 itself — skip those,
-        # they'd shadow real sub-district names and duplicate the 區 hint.
-        if name and not name.endswith("區") and "lon" in el and "lat" in el:
-            places.append((name, el["lon"], el["lat"]))
+        if not name or "lon" not in el or "lat" not in el:
+            continue
+        # Skip 區-named place nodes (they duplicate the 區 hint) and drops.
+        if name.endswith("區") or name in AREA_DROP:
+            continue
+        places.append((AREA_RENAME.get(name, name), el["lon"], el["lat"]))
     return places
 
 
-def assign_area(
-    point: list[float], places: list[tuple[str, float, float]]
-) -> str | None:
-    """Nearest place name, or None if the closest is farther than AREA_MAX_M."""
+def parse_stations(elements: list[dict]) -> list[tuple[str, float, float]]:
+    """[(display, lon, lat)] for MRT stations, display like 捷運市政府站."""
+    stations = []
+    for el in elements:
+        if el.get("type") != "node":
+            continue
+        name = el.get("tags", {}).get("name")
+        if name and "lon" in el and "lat" in el:
+            display = name if name.endswith("站") else f"捷運{name}站"
+            stations.append((display, el["lon"], el["lat"]))
+    return stations
+
+
+def _nearest(point: list[float], pts: list[tuple[str, float, float]]) -> tuple[str | None, float]:
     x, y = point
     best, best_d = None, float("inf")
-    for name, px, py in places:
+    for name, px, py in pts:
         d = haversine_m(x, y, px, py)
         if d < best_d:
             best_d, best = d, name
-    return best if best_d <= AREA_MAX_M else None
+    return best, best_d
+
+
+def assign_hint(
+    point: list[float],
+    stations: list[tuple[str, float, float]],
+    places: list[tuple[str, float, float]],
+) -> tuple[str | None, bool]:
+    """Return (area_display, near_mrt). Prefer a nearby MRT station, else a
+    suburb/quarter; near_mrt marks roads close enough to count as central."""
+    mrt, mrt_d = _nearest(point, stations)
+    area, area_d = _nearest(point, places)
+    near_mrt = mrt_d <= MRT_CENTRAL_MAX_M
+    if mrt and mrt_d <= MRT_HINT_MAX_M:
+        return mrt, near_mrt
+    if area and area_d <= AREA_MAX_M:
+        return area, near_mrt
+    return None, near_mrt
 
 
 def representative_point(lines: list[list[list[float]]]) -> list[float]:
@@ -279,6 +325,7 @@ def build_features(
     elements: list[dict],
     districts: list[tuple[str, list[list[list[float]]]]] | None = None,
     places: list[tuple[str, float, float]] | None = None,
+    stations: list[tuple[str, float, float]] | None = None,
 ) -> list[dict]:
     # One feature per full road name *including* 段, so the game can quiz
     # sections separately in 困難/極難 and group by `base` in 簡單/中等.
@@ -321,16 +368,17 @@ def build_features(
             props["lane"] = True
         if name in famous:
             props["famous"] = True
-        if districts or places:
+        if districts or places or stations:
             rep = representative_point(road["lines"])
             if districts:
                 district = assign_district(rep, districts)
                 if district:
                     props["district"] = district
-            if places:
-                area = assign_area(rep, places)
-                if area:
-                    props["area"] = area
+            area, near_mrt = assign_hint(rep, stations or [], places or [])
+            if area:
+                props["area"] = area
+            if near_mrt:
+                props["near_mrt"] = True
         features.append(
             {
                 "type": "Feature",
@@ -355,23 +403,30 @@ def print_stats(features: list[dict]) -> None:
     for f in features:
         p = f["properties"]
         b = bases.setdefault(
-            p["base"], {"len": 0, "lane": bool(p.get("lane")), "tier_len": {}}
+            p["base"],
+            {"len": 0, "lane": bool(p.get("lane")), "tier_len": {}, "near_mrt": False},
         )
         b["len"] += p["length_m"]
         b["tier_len"][p["tier"]] = b["tier_len"].get(p["tier"], 0) + p["length_m"]
+        b["near_mrt"] = b["near_mrt"] or bool(p.get("near_mrt"))
 
     easy = medium = hard = extreme = 0
     for name, b in bases.items():
         if b["lane"] or EASY_EXCLUDE_RE.search(name):
             continue
+        in_medium = False
         if max(b["tier_len"], key=b["tier_len"].get) != "hard":
             # proper district roads (幹道/次要/tertiary)
             if b["len"] >= MEDIUM_MIN_M:
-                medium += 1
+                in_medium = True
             if b["len"] >= EASY_MIN_M:
                 easy += 1
         elif b["len"] >= MEDIUM_RESID_MIN_M:
-            # long residential roads rejoin 中等 (內湖路, 迪化街…)
+            in_medium = True  # long residential roads (內湖路, 迪化街…)
+        # central roads next to an MRT station are notable despite length
+        if b["near_mrt"] and b["len"] >= MEDIUM_MRT_MIN_M:
+            in_medium = True
+        if in_medium:
             medium += 1
     for f in features:
         p = f["properties"]
@@ -389,12 +444,14 @@ def print_stats(features: list[dict]) -> None:
     with_area = sum(1 for f in features if f["properties"].get("area"))
     print("\nPrompt pool per difficulty:")
     print(f"  簡單 (easy):    {easy:5d} 幹道")
-    print(f"  中等 (medium):  {medium:5d} 區域道路+知名長住宅路(不含巷弄/雜路)")
+    near_mrt = sum(1 for f in features if f["properties"].get("near_mrt"))
+    print(f"  中等 (medium):  {medium:5d} 區域道路+長住宅路+捷運站旁(不含巷弄/雜路)")
     print(f"  困難 (hard):    {hard:5d} 分段道路+知名巷弄")
     print(f"  極難 (extreme): {extreme:5d} 全部(含巷弄)")
     print(f"  Total features: {len(features)} ({len(bases)} base roads)")
     print(f"  District hint coverage: {with_district}/{len(features)}")
-    print(f"  Area (sub-district) hint coverage: {with_area}/{len(features)}")
+    print(f"  Area/landmark hint coverage: {with_area}/{len(features)}")
+    print(f"  Near-MRT features: {near_mrt}/{len(features)}")
 
 
 def main() -> None:
@@ -425,7 +482,15 @@ def main() -> None:
     except SystemExit as e:
         print(f"Place fetch failed, continuing without area hints: {e}", file=sys.stderr)
 
-    features = build_features(raw.get("elements", []), districts, places)
+    stations: list[tuple[str, float, float]] = []
+    try:
+        sraw = fetch_overpass(MRT_QUERY_TEMPLATE.format(city=args.city))
+        stations = parse_stations(sraw.get("elements", []))
+        print(f"Parsed {len(stations)} MRT stations", file=sys.stderr)
+    except SystemExit as e:
+        print(f"MRT fetch failed, continuing without station hints: {e}", file=sys.stderr)
+
+    features = build_features(raw.get("elements", []), districts, places, stations)
 
     geojson = {"type": "FeatureCollection", "features": features}
     with open(args.out, "w", encoding="utf-8") as f:
