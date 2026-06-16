@@ -541,16 +541,14 @@ def main() -> None:
     raw = fetch_overpass(QUERY_TEMPLATE.format(city=args.city))
     print(f"Overpass returned {len(raw.get('elements', []))} ways", file=sys.stderr)
 
-    districts: list[tuple[str, list[list[list[float]]]]] = []
-    try:
-        draw = fetch_overpass(DISTRICT_QUERY_TEMPLATE.format(city=args.city))
-        districts = parse_districts(draw.get("elements", []))
-        print(
-            f"Parsed {len(districts)} districts: {[d[0] for d in districts]}",
-            file=sys.stderr,
-        )
-    except SystemExit as e:
-        print(f"District fetch failed, continuing without hints: {e}", file=sys.stderr)
+    # Districts are required — they drive both the area hint fallback and the
+    # disambiguation suffix. A missing fetch must abort this city (keeping its
+    # previous data) rather than commit districtless 「（其他2）」 garbage.
+    draw = fetch_overpass(DISTRICT_QUERY_TEMPLATE.format(city=args.city))
+    districts = parse_districts(draw.get("elements", []))
+    print(f"Parsed {len(districts)} districts: {[d[0] for d in districts]}", file=sys.stderr)
+    if not districts:
+        raise SystemExit("no district boundaries parsed — aborting to avoid districtless data")
 
     places: list[tuple[str, float, float]] = []
     try:
