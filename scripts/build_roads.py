@@ -54,8 +54,9 @@ node(area.city)["place"="suburb"]["name"];
 out;
 """
 
-# A road's nearest place node beyond this is too far to be a useful label.
-AREA_MAX_M = 3000
+# A road's nearest suburb node beyond this is too far to trust — better to
+# fall back to the 區 hint than to label it a neighbourhood across the river.
+AREA_MAX_M = 1500
 
 # SPEC §1: 簡單 = arterials, 中等 = district roads, 困難 = 巷弄 hell.
 TIER_BY_CLASS = {
