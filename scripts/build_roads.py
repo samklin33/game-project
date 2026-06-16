@@ -21,6 +21,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter, defaultdict
 
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
@@ -333,15 +334,49 @@ def representative_point(lines: list[list[list[float]]]) -> list[float]:
     return longest[len(longest) // 2]
 
 
+def cluster_ways(ways: list[dict]) -> list[list[dict]]:
+    """Group ways into connected components (sharing any rounded vertex).
+    Same-named but physically separate roads (新北's many 中山路) land in
+    different components; a continuous road across districts (忠孝東路)
+    stays one component."""
+    n = len(ways)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    node_first: dict[tuple[float, float], int] = {}
+    for i, w in enumerate(ways):
+        for pt in w["coords"]:
+            key = (pt[0], pt[1])
+            j = node_first.get(key)
+            if j is None:
+                node_first[key] = i
+            else:
+                union(i, j)
+    groups: dict[int, list[dict]] = defaultdict(list)
+    for i, w in enumerate(ways):
+        groups[find(i)].append(w)
+    return list(groups.values())
+
+
 def build_features(
     elements: list[dict],
     districts: list[tuple[str, list[list[list[float]]]]] | None = None,
     places: list[tuple[str, float, float]] | None = None,
     stations: list[tuple[str, float, float]] | None = None,
 ) -> list[dict]:
-    # One feature per full road name *including* 段, so the game can quiz
-    # sections separately in 困難/極難 and group by `base` in 簡單/中等.
-    roads: dict[str, dict] = {}
+    # Collect ways per base road (段 stripped), keeping each way separate so
+    # we can split a name into its physically-connected roads.
+    base_ways: dict[str, list[dict]] = defaultdict(list)
     for el in elements:
         if el.get("type") != "way" or "geometry" not in el:
             continue
@@ -356,53 +391,73 @@ def build_features(
         coords = [[round(pt["lon"], 5), round(pt["lat"], 5)] for pt in el["geometry"]]
         if len(coords) < 2:
             continue
-        road = roads.setdefault(full, {"lines": [], "class_length": {}, "length_m": 0.0})
-        seg_len = line_length_m(coords)
-        road["lines"].append(coords)
-        road["length_m"] += seg_len
-        road["class_length"][hw] = road["class_length"].get(hw, 0.0) + seg_len
+        base, section = normalize_name(full)
+        base_ways[base].append(
+            {"coords": coords, "hw": hw, "name": full, "section": section, "len": line_length_m(coords)}
+        )
 
     famous = set(FAMOUS_LANES)
+    matched_famous: set[str] = set()
     features = []
-    for name, road in roads.items():
-        # Tier by dominant highway class (by length) — a road that is 95%
-        # residential with one mis-tagged tertiary stub stays residential.
-        dominant = max(road["class_length"], key=road["class_length"].get)
-        base, section = normalize_name(name)
-        props = {
-            "name": name,
-            "base": base,
-            "section": section,
-            "tier": TIER_BY_CLASS[dominant],
-            "length_m": round(road["length_m"]),
-        }
-        if re.search(r"[巷弄]", base):
-            props["lane"] = True
-        if name in famous:
-            props["famous"] = True
-        if districts or places or stations:
-            rep = representative_point(road["lines"])
-            if districts:
-                district = assign_district(rep, districts)
+    for base, ways in base_ways.items():
+        components = cluster_ways(ways)
+        ambiguous = len(components) > 1
+        # Disambiguate components of the same name by district (中山路（板橋區）).
+        used_dist: Counter = Counter()
+        for comp in components:
+            district = (
+                assign_district(representative_point([w["coords"] for w in comp]), districts)
+                if districts
+                else None
+            )
+            suffix = ""
+            if ambiguous:
+                tag = district or "其他"
+                used_dist[tag] += 1
+                suffix = f"（{tag}）" if used_dist[tag] == 1 else f"（{tag}{used_dist[tag]}）"
+
+            # One feature per 段 within the component.
+            by_name: dict[str, list[dict]] = defaultdict(list)
+            for w in comp:
+                by_name[w["name"]].append(w)
+            for fname, wlist in by_name.items():
+                lines = [w["coords"] for w in wlist]
+                class_len: dict[str, float] = defaultdict(float)
+                for w in wlist:
+                    class_len[w["hw"]] += w["len"]
+                dominant = max(class_len, key=class_len.get)
+                props = {
+                    "name": fname + suffix,
+                    "base": base + suffix,
+                    "section": wlist[0]["section"],
+                    "tier": TIER_BY_CLASS[dominant],
+                    "length_m": round(sum(w["len"] for w in wlist)),
+                }
+                if re.search(r"[巷弄]", base):
+                    props["lane"] = True
+                if fname in famous:
+                    props["famous"] = True
+                    matched_famous.add(fname)
                 if district:
                     props["district"] = district
-            area = assign_hint(rep, stations or [], places or [])
-            if area:
-                props["area"] = area
-            if stations and near_any_station(road["lines"], stations):
-                props["near_mrt"] = True
-        features.append(
-            {
-                "type": "Feature",
-                "properties": props,
-                "geometry": {"type": "MultiLineString", "coordinates": road["lines"]},
-            }
-        )
+                if places or stations:
+                    rep = representative_point(lines)
+                    area = assign_hint(rep, stations or [], places or [])
+                    if area:
+                        props["area"] = area
+                    if stations and near_any_station(lines, stations):
+                        props["near_mrt"] = True
+                features.append(
+                    {
+                        "type": "Feature",
+                        "properties": props,
+                        "geometry": {"type": "MultiLineString", "coordinates": lines},
+                    }
+                )
     features.sort(key=lambda f: f["properties"]["name"])
 
-    matched = sorted(famous & set(roads))
-    missing = sorted(famous - set(roads))
-    print(f"famous lanes matched: {matched}", file=sys.stderr)
+    print(f"famous lanes matched: {sorted(matched_famous)}", file=sys.stderr)
+    missing = sorted(famous - matched_famous)
     if missing:
         print(f"famous lanes NOT in OSM data (check spelling): {missing}", file=sys.stderr)
     return features
