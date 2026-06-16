@@ -1,10 +1,10 @@
 [
+  { "id": "keelung",   "name": "基隆市", "osm": "基隆市", "file": "keelung.geojson" },
   { "id": "taipei",    "name": "臺北市", "osm": "臺北市", "file": "taipei.geojson" },
   { "id": "newtaipei", "name": "新北市", "osm": "新北市", "file": "newtaipei.geojson" },
   { "id": "taoyuan",   "name": "桃園市", "osm": "桃園市", "file": "taoyuan.geojson" },
+  { "id": "hsinchu",   "name": "新竹市", "osm": "新竹市", "file": "hsinchu.geojson" },
   { "id": "taichung",  "name": "臺中市", "osm": "臺中市", "file": "taichung.geojson" },
   { "id": "tainan",    "name": "臺南市", "osm": "臺南市", "file": "tainan.geojson" },
-  { "id": "kaohsiung", "name": "高雄市", "osm": "高雄市", "file": "kaohsiung.geojson" },
-  { "id": "keelung",   "name": "基隆市", "osm": "基隆市", "file": "keelung.geojson" },
-  { "id": "hsinchu",   "name": "新竹市", "osm": "新竹市", "file": "hsinchu.geojson" }
+  { "id": "kaohsiung", "name": "高雄市", "osm": "高雄市", "file": "kaohsiung.geojson" }
 ]
