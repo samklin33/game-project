@@ -151,7 +151,7 @@ export class GameUI {
       )
       .join("");
     this.overlay.innerHTML = `
-      <div class="panel">
+      <div class="panel panel-city">
         <h1 class="logo">找路</h1>
         <p class="tagline">選擇城市</p>
         <div class="city-grid">${buttons}</div>

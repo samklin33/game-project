@@ -144,6 +144,15 @@ body {
 
 /* City buttons reuse the difficulty design language (flat rounded pills)
    but in a 2-col grid so 8 cities stay compact (4 rows, not a long list). */
+/* City picker is wider than the other panels, with slimmer side padding,
+   so the 2-col pills feel roomy. */
+.panel-city {
+  width: min(460px, 94vw);
+  max-width: none;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
 .city-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
