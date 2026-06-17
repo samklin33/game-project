@@ -154,7 +154,7 @@ export class GameUI {
       <div class="panel">
         <h1 class="logo">找路</h1>
         <p class="tagline">選擇城市</p>
-        ${buttons}
+        <div class="city-grid">${buttons}</div>
       </div>
     `;
     this.overlay.hidden = false;
